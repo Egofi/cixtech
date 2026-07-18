@@ -6,5 +6,7 @@ export * from "./solvency.js";
 export * from "./ledger.port.js";
 export * from "./ledger.service.js";
 export * from "./reconcile.js";
+export * from "./sql/sql-client.js";
+export * from "./sql/schema.js";
 export { MemoryLedgerStore } from "./adapters/memory-store.js";
-export { PrismaLedgerStore } from "./adapters/prisma-store.js";
+export { SqlLedgerStore } from "./adapters/sql-ledger-store.js";

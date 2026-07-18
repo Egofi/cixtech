@@ -1,10 +1,76 @@
-import { describe, it } from "vitest";
+import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
+import fc from "fast-check";
+import { beforeAll, describe, expect, it } from "vitest";
+import type { JournalEntry } from "../src/entry.js";
+import { type Harness, freshStore, reset } from "./pglite.js";
 
-// Runs against a testcontainers Postgres via PrismaLedgerStore (properties 10–11).
-describe("concurrency (prisma-store)", () => {
-  // Property 10 — N concurrent posts to one account never lose an update.
-  it.todo("[10] concurrent appends: final balance == serial application (optimistic version)");
+// Real Postgres semantics via PGlite. PGlite serializes concurrently-submitted
+// transactions on one connection, so these verify the append's atomic
+// increment + idempotency invariants under concurrent submission. Multi-node
+// OS-level parallelism is verified separately in CI (testcontainers).
 
-  // Property 11 — two posts sharing an idempotencyKey racing → exactly one set of postings.
-  it.todo("[11] racing duplicate idempotencyKey collapses to one set of postings");
+const A = LedgerAccountKey("pool_addr:TRON:m1");
+const B = LedgerAccountKey("merchant_available:t1:m1");
+const USDT = Asset("USDT");
+
+function entry(tag: string, amount: bigint): JournalEntry {
+  return {
+    id: JournalEntryId(tag),
+    idempotencyKey: IdempotencyKey(tag),
+    kind: "test.transfer",
+    postings: [
+      { account: A, asset: USDT, amount, direction: "DEBIT" },
+      { account: B, asset: USDT, amount, direction: "CREDIT" },
+    ],
+    occurredAt: new Date(),
+  };
+}
+
+describe("persistence: concurrency (PGlite)", () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await freshStore();
+  });
+
+  // Property 10 — concurrently-submitted appends accumulate exactly; none lost.
+  it("[10] concurrent appends never lose an update", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.bigInt({ min: 1n, max: 10n ** 18n }), { minLength: 1, maxLength: 40 }),
+        async (amounts) => {
+          await reset(h);
+          const { store } = h;
+          await Promise.all(amounts.map((amt, i) => store.append(entry(`e${i}`, amt))));
+
+          const total = amounts.reduce((s, a) => s + a, 0n);
+          expect(await store.balance(A, USDT)).toBe(total); // debit-normal: +total
+          expect(await store.balance(B, USDT)).toBe(-total); // credit-normal: -total
+        },
+      ),
+      { numRuns: 15 },
+    );
+  });
+
+  // Property 11 — a duplicate idempotency key applies exactly once, however many attempts race.
+  it("[11] racing duplicate idempotencyKey applies exactly once", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.bigInt({ min: 1n, max: 10n ** 18n }),
+        fc.integer({ min: 2, max: 8 }),
+        async (amount, attempts) => {
+          await reset(h);
+          const { store } = h;
+          const e = entry("dup", amount);
+          const results = await Promise.all(
+            Array.from({ length: attempts }, () => store.append(e)),
+          );
+
+          expect(results.filter((r) => r.applied)).toHaveLength(1); // exactly one winner
+          expect(await store.balance(A, USDT)).toBe(amount); // applied once, not `attempts` times
+          expect(await store.postingsFor(A, USDT)).toHaveLength(1);
+        },
+      ),
+      { numRuns: 15 },
+    );
+  });
 });

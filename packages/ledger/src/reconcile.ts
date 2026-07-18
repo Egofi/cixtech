@@ -1,14 +1,6 @@
 import type { Asset, LedgerAccountKey } from "@cixtech/types";
-import type { LedgerStore } from "./ledger.port.js";
 
-/**
- * Internal reconciler: for every account+asset, the materialized `balance()` must
- * equal the signed sum of `postingsFor()`. Any drift means the ledger disagrees
- * with its own history — a bug or tampering. Reports drift; never self-heals.
- *
- * TODO(step1): implement + property 12 (must catch an out-of-band mutation, i.e.
- * pass mutation testing rather than rubber-stamping).
- */
+/** A materialized balance that disagrees with the signed sum of its postings. */
 export interface DriftRow {
   account: LedgerAccountKey;
   asset: Asset;
@@ -16,6 +8,12 @@ export interface DriftRow {
   fromHistory: bigint;
 }
 
-export async function reconcileInternal(_store: LedgerStore): Promise<DriftRow[]> {
-  throw new Error("TODO(step1): implement internal reconciler (balance == Σ postings)");
+/**
+ * A store that can check its materialized balances against posting history
+ * (property 12). An empty result means consistent; a non-empty result means a bug
+ * or out-of-band mutation and must trip the circuit breaker (ADR 0010) — the
+ * reconciler reports, it never self-heals.
+ */
+export interface InternalReconciler {
+  reconcileInternal(): Promise<DriftRow[]>;
 }

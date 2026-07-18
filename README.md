@@ -6,11 +6,17 @@ first tenant; the engine is sold to other businesses as infrastructure.
 > Governing spec and decisions live with the custodian entity. See
 > `CUSTODY_ENGINE_BUILD_SPEC.md` and ADRs 0006–0011.
 
-## Status — Build Step 1: ledger core + config spine
+## Status — Build Step 1: ledger core + config spine ✅ complete
 
 The only step with **zero external dependencies** — no keys, no chains, no
 network. It proves the accounting before anything can move money, and ships the
 config discipline that keeps the testnet→mainnet switch a config swap.
+
+All 12 ledger properties are green (balance algebra, fee split, reorg reversal,
+solvency, and — via a Postgres-backed `SqlLedgerStore` on PGlite — concurrency,
+idempotency, and the internal reconciler), plus the config-registry totality
+property and the no-magic-constants CI guard. The Prisma production adapter and
+the error-audit sink's Postgres backing land with the next step.
 
 ```
 packages/

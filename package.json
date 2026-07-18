@@ -1,0 +1,28 @@
+{
+  "name": "cixtech",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Licensed multi-tenant crypto-custody engine (Wallet-as-a-Service)",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "lint": "biome check --write .",
+    "check": "biome check --write .",
+    "guard:constants": "node tooling/no-magic-constants/check.mjs packages"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.0",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8",
+    "fast-check": "^3.23.0",
+    "@testcontainers/postgresql": "^10.16.0"
+  },
+  "packageManager": "pnpm@9.15.4"
+}

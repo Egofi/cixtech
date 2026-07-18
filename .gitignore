@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# Secrets / env — never commit
+.env
+.env.*
+*.pem
+
+# MPC / key material must never touch the repo (ADR 0007)
+*.share
+*.keyshare
+keyshares/

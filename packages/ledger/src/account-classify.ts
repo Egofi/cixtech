@@ -10,7 +10,10 @@ export function accountTypeOf(key: LedgerAccountKey): AccountType {
   if (prefix.startsWith("merchant_") || prefix === "compliance_suspense") {
     return AccountType.Liability;
   }
-  if (["pool_addr", "treasury", "cold", "gas_float"].includes(prefix)) return AccountType.Asset;
+  // `pool_addr` and its pre-finality variant `pool_addr_unconfirmed` are both assets.
+  if (prefix.startsWith("pool_addr") || ["treasury", "cold", "gas_float"].includes(prefix)) {
+    return AccountType.Asset;
+  }
   if (prefix.endsWith("_revenue")) return AccountType.Revenue;
   if (prefix.endsWith("_expense")) return AccountType.Expense;
   throw new Error(`Unknown account key prefix: ${prefix}`);

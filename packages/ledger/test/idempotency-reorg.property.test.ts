@@ -66,6 +66,6 @@ describe("idempotency & reorg", () => {
     );
   });
 
-  // Property 6 — any interleaving of {detect, finalize, reverse} keeps solvency intact.
-  it.todo("[6] interleaved deposit lifecycles preserve the solvency invariant");
+  // Property 6 (detect / finalize / reverse keep solvency) lives in solvency.property.test.ts,
+  // since it asserts the solvency invariant rather than balance restoration.
 });

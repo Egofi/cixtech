@@ -221,8 +221,49 @@ export function feeSwept(input: FeeSweptInput): JournalEntry {
   return entry;
 }
 
-// ── deposit detected (the pending stage before finality) ───────────────────────
-// TODO(step1): implement depositDetected as a balanced builder; see ADR 0010.
+export interface DepositDetectedInput {
+  id: JournalEntryId;
+  idempotencyKey: IdempotencyKey;
+  asset: Asset;
+  amount: bigint;
+  poolAddrUnconfirmed: LedgerAccountKey;
+  merchantPending: LedgerAccountKey;
+  occurredAt?: Date;
+}
+
+/**
+ * Record a seen-but-not-yet-final deposit (ADR 0010): the value sits in an
+ * `pool_addr_unconfirmed` asset against a `merchant_pending` liability. At
+ * finality this is reversed and `depositFinalized` credits the confirmed state;
+ * a reorg before finality is just `reverse()` of this entry.
+ */
+export function depositDetected(input: DepositDetectedInput): JournalEntry {
+  if (input.amount <= 0n) {
+    throw new InvalidPostingError(`Deposit amount must be positive, got ${input.amount}`);
+  }
+  const entry: JournalEntry = {
+    id: input.id,
+    idempotencyKey: input.idempotencyKey,
+    kind: "deposit.detected",
+    postings: [
+      {
+        account: input.poolAddrUnconfirmed,
+        asset: input.asset,
+        amount: input.amount,
+        direction: "DEBIT",
+      },
+      {
+        account: input.merchantPending,
+        asset: input.asset,
+        amount: input.amount,
+        direction: "CREDIT",
+      },
+    ],
+    occurredAt: input.occurredAt ?? new Date(),
+  };
+  assertBalanced(entry);
+  return entry;
+}
 
 /** Reverse a prior entry (reorg / compensation). Flips every posting's direction. */
 export function reverse(

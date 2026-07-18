@@ -25,5 +25,12 @@
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   },
-  "packageManager": "pnpm@9.15.4"
+  "packageManager": "pnpm@9.15.4",
+  "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@scure/base": "^2.2.0",
+    "@scure/bip32": "^2.2.0",
+    "zod": "^4.4.3"
+  }
 }

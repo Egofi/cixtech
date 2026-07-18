@@ -127,8 +127,102 @@ export function payoutLocked(input: PayoutLockedInput): JournalEntry {
   return entry;
 }
 
-// ── deposit detected / payout settled / fee swept ──────────────────────────────
-// TODO(step1): implement each as a balanced builder; see ADR 0010 posting table.
+/** Optional network-fee leg, in a (usually native) gas asset, balanced on its own. */
+export interface NetworkFeeLeg {
+  asset: Asset;
+  amount: bigint;
+  gasFloat: LedgerAccountKey;
+  expense: LedgerAccountKey;
+}
+
+function networkFeePostings(fee: NetworkFeeLeg | undefined): Posting[] {
+  if (!fee || fee.amount <= 0n) return [];
+  return [
+    { account: fee.expense, asset: fee.asset, amount: fee.amount, direction: "DEBIT" },
+    { account: fee.gasFloat, asset: fee.asset, amount: fee.amount, direction: "CREDIT" },
+  ];
+}
+
+export interface PayoutSettledInput {
+  id: JournalEntryId;
+  idempotencyKey: IdempotencyKey;
+  asset: Asset;
+  amount: bigint;
+  merchantPendingWithdrawal: LedgerAccountKey;
+  poolAddr: LedgerAccountKey;
+  /** Gas burned to send the payout, in a separate asset. Balanced independently. */
+  networkFee?: NetworkFeeLeg;
+  occurredAt?: Date;
+}
+
+/**
+ * Settle a locked payout on-chain (ADR 0010): the earmarked liability is
+ * discharged and the funds physically leave the pool. This is the ONLY time the
+ * payout asset leaves custody. The gas leg (if any) is a separate asset and
+ * balances on its own.
+ */
+export function payoutSettled(input: PayoutSettledInput): JournalEntry {
+  if (input.amount <= 0n) {
+    throw new InvalidPostingError(`Payout amount must be positive, got ${input.amount}`);
+  }
+  const entry: JournalEntry = {
+    id: input.id,
+    idempotencyKey: input.idempotencyKey,
+    kind: "payout.settled",
+    postings: [
+      {
+        account: input.merchantPendingWithdrawal,
+        asset: input.asset,
+        amount: input.amount,
+        direction: "DEBIT",
+      },
+      { account: input.poolAddr, asset: input.asset, amount: input.amount, direction: "CREDIT" },
+      ...networkFeePostings(input.networkFee),
+    ],
+    occurredAt: input.occurredAt ?? new Date(),
+  };
+  assertBalanced(entry);
+  return entry;
+}
+
+export interface FeeSweptInput {
+  id: JournalEntryId;
+  idempotencyKey: IdempotencyKey;
+  asset: Asset;
+  amount: bigint;
+  poolAddr: LedgerAccountKey;
+  treasury: LedgerAccountKey;
+  networkFee?: NetworkFeeLeg;
+  occurredAt?: Date;
+}
+
+/**
+ * Sweep accrued fee revenue out of the scattered pool addresses into treasury
+ * (ADR 0010). Revenue was already recognized at deposit finality, so this only
+ * RELOCATES the asset — it does not touch `egofi_fee_revenue`. Conservation is
+ * preserved: pool falls by exactly what treasury gains.
+ */
+export function feeSwept(input: FeeSweptInput): JournalEntry {
+  if (input.amount <= 0n) {
+    throw new InvalidPostingError(`Fee sweep amount must be positive, got ${input.amount}`);
+  }
+  const entry: JournalEntry = {
+    id: input.id,
+    idempotencyKey: input.idempotencyKey,
+    kind: "fee.swept",
+    postings: [
+      { account: input.treasury, asset: input.asset, amount: input.amount, direction: "DEBIT" },
+      { account: input.poolAddr, asset: input.asset, amount: input.amount, direction: "CREDIT" },
+      ...networkFeePostings(input.networkFee),
+    ],
+    occurredAt: input.occurredAt ?? new Date(),
+  };
+  assertBalanced(entry);
+  return entry;
+}
+
+// ── deposit detected (the pending stage before finality) ───────────────────────
+// TODO(step1): implement depositDetected as a balanced builder; see ADR 0010.
 
 /** Reverse a prior entry (reorg / compensation). Flips every posting's direction. */
 export function reverse(

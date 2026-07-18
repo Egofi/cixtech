@@ -1,4 +1,5 @@
 import type { ChainEnv } from "./env.js";
+import { ConfigNotFoundError } from "./errors.js";
 
 export interface TokenConfig {
   readonly symbol: string;
@@ -44,6 +45,6 @@ const TOKENS: Record<ChainEnv, Record<string, Record<string, TokenConfig>>> = {
 
 export function tokenConfig(env: ChainEnv, chain: string, symbol: string): TokenConfig {
   const cfg = TOKENS[env][chain.toUpperCase()]?.[symbol.toUpperCase()];
-  if (!cfg) throw new Error(`No token config for ${symbol} on ${chain}/${env}`);
+  if (!cfg) throw new ConfigNotFoundError(`No token config for ${symbol} on ${chain}/${env}`);
   return cfg;
 }

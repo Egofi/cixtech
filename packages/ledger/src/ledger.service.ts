@@ -1,3 +1,4 @@
+import { AppError } from "@cixtech/errors";
 import type { Asset, LedgerAccountKey } from "@cixtech/types";
 import { normalBalance } from "./account-classify.js";
 import { assertBalanced } from "./balanced.js";
@@ -7,7 +8,9 @@ import { type PayoutLockedInput, payoutLocked } from "./posting-flows.js";
 import { type AssetSolvency, solvencyDrift } from "./solvency.js";
 
 /** A payout was requested for more than the merchant's available balance. */
-export class InsufficientFundsError extends Error {}
+export class InsufficientFundsError extends AppError {
+  readonly code = "LEDGER_INSUFFICIENT_FUNDS";
+}
 
 /**
  * The only path that writes to the ledger. Enforces the balance rule before any
@@ -40,6 +43,14 @@ export class LedgerService {
     if (input.amount > available) {
       throw new InsufficientFundsError(
         `Payout of ${input.amount} exceeds available ${available} for ${input.merchantAvailable}`,
+        {
+          context: {
+            account: String(input.merchantAvailable),
+            asset: String(input.asset),
+            requested: input.amount.toString(),
+            available: available.toString(),
+          },
+        },
       );
     }
     return this.post(payoutLocked(input));

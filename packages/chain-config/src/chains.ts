@@ -1,4 +1,5 @@
 import type { ChainEnv } from "./env.js";
+import { ConfigNotFoundError } from "./errors.js";
 
 export type ChainFamily = "EVM" | "UTXO" | "TRON" | "XRP";
 
@@ -62,7 +63,7 @@ const CHAINS: Record<ChainEnv, Record<string, ChainConfig>> = {
 
 export function chainConfig(env: ChainEnv, chain: string): ChainConfig {
   const cfg = CHAINS[env][chain.toUpperCase()];
-  if (!cfg) throw new Error(`No chain config for ${chain} on ${env}`);
+  if (!cfg) throw new ConfigNotFoundError(`No chain config for ${chain} on ${env}`);
   return cfg;
 }
 

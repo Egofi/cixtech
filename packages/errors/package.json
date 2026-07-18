@@ -1,5 +1,5 @@
 {
-  "name": "@cixtech/chain-config",
+  "name": "@cixtech/errors",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,9 +10,5 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
-  },
-  "dependencies": {
-    "@cixtech/errors": "workspace:*",
-    "@cixtech/types": "workspace:*"
   }
 }

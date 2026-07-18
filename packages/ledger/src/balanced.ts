@@ -1,3 +1,4 @@
+import { AppError } from "@cixtech/errors";
 import type { JournalEntry, Posting } from "./entry.js";
 
 /**
@@ -23,8 +24,12 @@ export function isBalanced(entry: JournalEntry): boolean {
   return true;
 }
 
-export class UnbalancedEntryError extends Error {}
-export class InvalidPostingError extends Error {}
+export class UnbalancedEntryError extends AppError {
+  readonly code = "LEDGER_UNBALANCED_ENTRY";
+}
+export class InvalidPostingError extends AppError {
+  readonly code = "LEDGER_INVALID_POSTING";
+}
 
 /** Throws unless the entry sums to zero per asset. The single hard rule of the ledger. */
 export function assertBalanced(entry: JournalEntry): void {

@@ -1,6 +1,8 @@
 import type { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
-import { assertBalanced } from "./balanced.js";
+import { InvalidPostingError, assertBalanced } from "./balanced.js";
 import { type JournalEntry, type Posting, flip } from "./entry.js";
+
+const BPS_DENOMINATOR = 10_000n;
 
 /**
  * Pure `event → JournalEntry` builders for the ADR 0010 money flows. Each returns
@@ -24,13 +26,60 @@ export interface DepositFinalizedInput {
 }
 
 /**
- * Credit a confirmed deposit, splitting the fee. Must satisfy, exactly:
- *   merchant_available + egofi_fee_revenue == amount   (no base-unit leak)
- * TODO(step1): implement integer fee math (floor fee, remainder to merchant),
- * then property 3 (decimal precision) and property 9 (pool identity) pin it.
+ * Split a gross deposit into the platform fee (floored) and the merchant's
+ * remainder, in integer base units. Floored fee + remainder is *exactly* the
+ * gross, so no base unit is ever lost or invented (property 3); flooring the fee
+ * rounds in the merchant's favour, never ours.
  */
-export function depositFinalized(_input: DepositFinalizedInput): JournalEntry {
-  throw new Error("TODO(step1): implement depositFinalized per ADR 0010");
+export function splitFee(amount: bigint, feeBasisPoints: number): { fee: bigint; net: bigint } {
+  if (amount <= 0n) {
+    throw new InvalidPostingError(`Deposit amount must be positive, got ${amount}`);
+  }
+  if (!Number.isInteger(feeBasisPoints) || feeBasisPoints < 0 || feeBasisPoints >= 10_000) {
+    throw new InvalidPostingError(
+      `feeBasisPoints must be an integer in [0, 10000), got ${feeBasisPoints}`,
+    );
+  }
+  const fee = (amount * BigInt(feeBasisPoints)) / BPS_DENOMINATOR; // floor, since bigint division truncates
+  return { fee, net: amount - fee };
+}
+
+/**
+ * Credit a confirmed deposit at finality (ADR 0010). The whole gross lands in the
+ * merchant's pool address (ASSET, debit); the liability we owe the merchant
+ * (`merchant_available`, credit) plus our recognized fee (`egofi_fee_revenue`,
+ * credit) sum back to the gross. A zero fee (small ticket rounds to 0) omits the
+ * fee leg so no zero-amount posting is created.
+ *
+ * Satisfies:
+ *   merchant_available + egofi_fee_revenue == amount              (property 3, exact)
+ *   pool_addr == merchant_available + egofi_fee_revenue           (ADR 0009 identity)
+ */
+export function depositFinalized(input: DepositFinalizedInput): JournalEntry {
+  const { fee, net } = splitFee(input.amount, input.feeBasisPoints);
+
+  const postings: Posting[] = [
+    { account: input.poolAddr, asset: input.asset, amount: input.amount, direction: "DEBIT" },
+    { account: input.merchantAvailable, asset: input.asset, amount: net, direction: "CREDIT" },
+  ];
+  if (fee > 0n) {
+    postings.push({
+      account: input.feeRevenue,
+      asset: input.asset,
+      amount: fee,
+      direction: "CREDIT",
+    });
+  }
+
+  const entry: JournalEntry = {
+    id: input.id,
+    idempotencyKey: input.idempotencyKey,
+    kind: "deposit.finalized",
+    postings,
+    occurredAt: input.occurredAt ?? new Date(),
+  };
+  assertBalanced(entry);
+  return entry;
 }
 
 // ── deposit detected / payout locked / payout settled / fee swept ──────────────

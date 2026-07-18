@@ -34,6 +34,17 @@ export function decodeTronAddress(address: string): Uint8Array {
   return b58check.decode(address);
 }
 
+/** Encodes a hex Tron address (0x41-prefixed, 21 bytes) — as returned raw by the
+ * node in native transfers — to its base58check form. */
+export function tronAddressFromHex(hex: string): string {
+  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+  const bytes = Uint8Array.from(Buffer.from(clean, "hex"));
+  if (bytes.length !== 21 || bytes[0] !== TRON_ADDRESS_PREFIX) {
+    throw new Error(`Not a 21-byte 0x41 Tron address payload: ${hex}`);
+  }
+  return b58check.encode(bytes);
+}
+
 /**
  * Derives a per-invoice receive address from a merchant's account-level xpub at
  * the standard BIP44 external path `<xpub>/0/index`. The merchant owns the seed,

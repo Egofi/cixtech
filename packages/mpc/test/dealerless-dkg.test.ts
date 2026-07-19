@@ -2,7 +2,7 @@ import { secp256k1 } from "@noble/curves/secp256k1";
 import { describe, expect, it } from "vitest";
 import { dealerlessDkg, verifyShare } from "../src/dealerless-dkg.js";
 import { combine, scalarToBytes } from "../src/shamir.js";
-import { thresholdSignerFromShares } from "../src/threshold-signer.js";
+import { BadContributionError, thresholdSignerFromShares } from "../src/threshold-signer.js";
 
 describe("dealerless DKG + verifiable secret sharing", () => {
   it("produces a group key nobody chose, reconstructable from a threshold of shares", () => {
@@ -35,5 +35,22 @@ describe("dealerless DKG + verifiable secret sharing", () => {
     const hash = new Uint8Array(32).fill(9);
     const sig = signer.signHash(0, hash);
     expect(secp256k1.verify(sig.subarray(0, 64), hash, publicKey)).toBe(true);
+  });
+
+  it("a signer given the VSS commitments rejects a corrupted contribution", () => {
+    const { shares, publicKey, commitments } = dealerlessDkg(3, 5);
+    // Corrupt the first node's share; the Feldman check must catch it at sign time.
+    const first = shares[0] as (typeof shares)[number];
+    const tampered = [
+      { ...first, share: { ...first.share, y: first.share.y + 1n } },
+      ...shares.slice(1),
+    ];
+    const signer = thresholdSignerFromShares(
+      tampered,
+      publicKey,
+      (p) => Buffer.from(p).toString("hex"),
+      { commitments },
+    );
+    expect(() => signer.signHash(0, new Uint8Array(32).fill(9))).toThrow(BadContributionError);
   });
 });

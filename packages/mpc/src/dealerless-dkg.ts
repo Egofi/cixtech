@@ -46,7 +46,7 @@ export function dealerlessDkg(threshold: number, n: number): DealerlessResult {
   for (let j = 1; j <= n; j++) {
     let y = 0n;
     for (const p of participants) y = mod(y + evalPoly(p.coeffs, BigInt(j)));
-    shares.push({ nodeId: j, share: { x: BigInt(j), y }, publicKey, threshold });
+    shares.push({ nodeId: j, share: { x: BigInt(j), y }, publicKey, threshold, epoch: 0 });
   }
   return { shares, publicKey, commitments };
 }

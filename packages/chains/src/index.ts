@@ -4,4 +4,8 @@ export * from "./tron/address.js";
 export * from "./tron/trc20.js";
 export * from "./tron/native.js";
 export * from "./tron/tron-adapter.js";
+export * from "./tron/tron-signer.js";
 export * from "./ingest/deposit-ingestor.js";
+export * from "./payout/policy.js";
+export * from "./payout/broadcaster.js";
+export * from "./payout/payout-service.js";

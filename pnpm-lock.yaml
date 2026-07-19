@@ -82,6 +82,9 @@ importers:
       '@cixtech/ledger':
         specifier: workspace:*
         version: link:../ledger
+      '@cixtech/signing':
+        specifier: workspace:*
+        version: link:../signing
       '@cixtech/types':
         specifier: workspace:*
         version: link:../types
@@ -122,6 +125,21 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.5.4
         version: 0.5.4
+
+  packages/signing:
+    dependencies:
+      '@cixtech/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@noble/curves':
+        specifier: ^1.7.0
+        version: 1.9.7
+      '@noble/hashes':
+        specifier: ^1.6.0
+        version: 1.8.0
+      '@scure/bip32':
+        specifier: ^2.2.0
+        version: 2.2.0
 
   packages/types: {}
 

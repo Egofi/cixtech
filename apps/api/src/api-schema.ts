@@ -19,4 +19,23 @@ CREATE TABLE IF NOT EXISTS account (
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS account_tenant ON account(tenant_id);
+
+-- Reserve-then-store idempotency for mutating requests. A row is reserved
+-- (response NULL) before processing; filled on success; deleted on failure so a
+-- retry can proceed.
+CREATE TABLE IF NOT EXISTS idempotency_key (
+  tenant_id  text NOT NULL,
+  key        text NOT NULL,
+  status     int,
+  response   text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, key)
+);
+
+-- One outbound webhook endpoint per tenant (URL + HMAC secret).
+CREATE TABLE IF NOT EXISTS webhook_endpoint (
+  tenant_id text PRIMARY KEY REFERENCES tenant(id),
+  url       text NOT NULL,
+  secret    text NOT NULL
+);
 `;

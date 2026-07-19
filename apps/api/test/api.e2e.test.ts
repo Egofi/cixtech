@@ -1,57 +1,7 @@
-import type { AddressBalance } from "@cixtech/attribution";
-import { PolicyEngine } from "@cixtech/chains";
-import type {
-  BroadcastResult,
-  ChainDeposit,
-  PayoutBroadcaster,
-  PayoutRequest,
-} from "@cixtech/chains";
-import { deriveTronAddress } from "@cixtech/chains";
-import { PGlite } from "@electric-sql/pglite";
-import { HDKey } from "@scure/bip32";
+import type { ChainDeposit } from "@cixtech/chains";
 import type { FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildApp } from "../src/app.js";
-import { buildEngine } from "../src/engine.js";
-import { applySchemas, pgliteClient } from "../src/sql.js";
-
-const DEST = "TTetbYe8bRMfz6ASefJACCb2gSzwbe9AqW";
-const ENGINE_XPUB = HDKey.fromMasterSeed(
-  Uint8Array.from(Buffer.from("00112233445566778899aabbccddeeff", "hex")),
-).derive("m/44'/195'/0'").publicExtendedKey;
-
-class FakeBroadcaster implements PayoutBroadcaster {
-  sent: PayoutRequest[] = [];
-  async send(req: PayoutRequest): Promise<BroadcastResult> {
-    this.sent.push(req);
-    return { txId: `${"a".repeat(63)}${this.sent.length}` };
-  }
-}
-const plentiful: AddressBalance = {
-  async balance() {
-    return 10n ** 30n;
-  },
-};
-
-async function setup() {
-  const db = new PGlite();
-  await applySchemas(db);
-  const sql = pgliteClient(db);
-  const broadcaster = new FakeBroadcaster();
-  const engine = buildEngine({
-    sql,
-    broadcaster,
-    balances: plentiful,
-    policy: new PolicyEngine({ maxPerPayoutBaseUnits: 1_000_000_000n, allowlist: new Set([DEST]) }),
-    engineXpub: ENGINE_XPUB,
-    deriveAddress: (_chain, xpub, index) => deriveTronAddress(xpub, index),
-    feeBasisPoints: 50,
-  });
-  const { apiKey } = await engine.tenants.createTenant("acme");
-  return { app: buildApp(engine), engine, broadcaster, apiKey };
-}
-
-const auth = (apiKey: string) => ({ "x-api-key": apiKey });
+import { DEST, auth, makeApi } from "./harness.js";
 
 async function createAccount(app: FastifyInstance, apiKey: string): Promise<string> {
   const res = await app.inject({
@@ -64,9 +14,9 @@ async function createAccount(app: FastifyInstance, apiKey: string): Promise<stri
 }
 
 describe("tenant API", () => {
-  let ctx: Awaited<ReturnType<typeof setup>>;
+  let ctx: Awaited<ReturnType<typeof makeApi>>;
   beforeEach(async () => {
-    ctx = await setup();
+    ctx = await makeApi();
   });
 
   it("rejects unauthenticated requests", async () => {
@@ -196,5 +146,45 @@ describe("tenant API", () => {
 
     expect(second.json()).toEqual(first.json()); // replayed
     expect(broadcaster.sent).toHaveLength(1); // broadcast exactly once
+  });
+
+  it("releases the idempotency key after a failed request so a retry can proceed", async () => {
+    const { app, engine, apiKey } = ctx;
+    const accountId = await createAccount(app, apiKey);
+    const addr = await app.inject({
+      method: "POST",
+      url: `/v1/accounts/${accountId}/deposit-addresses`,
+      headers: auth(apiKey),
+      payload: { chain: "TRON", asset: "USDT" },
+    });
+    await engine.ingestor.ingestConfirmed({
+      chain: "TRON",
+      txId: "seed4",
+      index: 0,
+      to: addr.json().address,
+      from: "TSender",
+      asset: "USDT",
+      amountBaseUnits: 10_000_000n,
+    });
+
+    const headers = { ...auth(apiKey), "idempotency-key": "retry" };
+    // First attempt fails policy (non-allow-listed) → key released.
+    const bad = await app.inject({
+      method: "POST",
+      url: `/v1/accounts/${accountId}/withdrawals`,
+      headers,
+      payload: { chain: "TRON", asset: "USDT", amount: "1000000", destination: "TStranger" },
+    });
+    expect(bad.statusCode).toBe(403);
+
+    // Retry with the SAME key but a valid destination now succeeds (not a 409 replay).
+    const ok = await app.inject({
+      method: "POST",
+      url: `/v1/accounts/${accountId}/withdrawals`,
+      headers,
+      payload: { chain: "TRON", asset: "USDT", amount: "1000000", destination: DEST },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().status).toBe("settled");
   });
 });

@@ -58,6 +58,11 @@ export class PoolManager {
     return this.store.addressesForMerchant(tenant, merchant, chain);
   }
 
+  /** Addresses detection should watch — currently expecting or holding a deposit. */
+  activeAddresses(chain: string): Promise<PoolAddressRow[]> {
+    return this.store.activeAddresses(chain);
+  }
+
   /** The owning account of a deposit address, or null if unknown / not currently assigned. */
   async resolve(
     chain: string,

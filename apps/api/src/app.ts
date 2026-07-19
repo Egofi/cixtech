@@ -18,6 +18,8 @@ const STATUS: Record<string, number> = {
   POOL_INSUFFICIENT_FUNDS: 409,
 };
 
+const WEBHOOK_SECRET_PREFIX = "cxs_";
+
 const header = (req: FastifyRequest, name: string): string | undefined => {
   const v = req.headers[name];
   return typeof v === "string" ? v : undefined;
@@ -45,7 +47,6 @@ export function buildApp(engine: Engine, opts: AppOptions = {}): FastifyInstance
   const app = Fastify({ logger: false });
   const errorSink = opts.errorSink ?? new InMemoryErrorSink();
   const authed = new WeakMap<FastifyRequest, Tenant>();
-  const idempotency = new Map<string, { status: number; body: unknown }>(); // in-memory; DB-backed in prod
 
   const tenantOf = (req: FastifyRequest): Tenant => {
     const t = authed.get(req);
@@ -70,6 +71,15 @@ export function buildApp(engine: Engine, opts: AppOptions = {}): FastifyInstance
   });
 
   app.get("/health", async () => ({ status: "ok" }));
+
+  // Configure the tenant's outbound webhook. The HMAC secret is returned ONCE.
+  app.put("/v1/webhook", async (req, reply) => {
+    const tenant = tenantOf(req);
+    const url = str(req.body, "url");
+    const secret = `${WEBHOOK_SECRET_PREFIX}${randomUUID().replace(/-/g, "")}`;
+    await engine.webhookEndpoints.set(tenant.id, url, secret);
+    await reply.status(201).send({ url, secret });
+  });
 
   // Create a sub-account (a tenant's merchant).
   app.post("/v1/accounts", async (req, reply) => {
@@ -114,30 +124,37 @@ export function buildApp(engine: Engine, opts: AppOptions = {}): FastifyInstance
 
     const key = header(req, "idempotency-key");
     if (!key) throw new BadRequestError("Idempotency-Key header required");
-    const idemKey = `${tenant.id}:${key}`;
-    const cached = idempotency.get(idemKey);
-    if (cached) {
-      await reply.status(cached.status).send(cached.body);
+
+    // Reserve the key; a repeat replays the stored response (or 409 if in progress).
+    const replay = await engine.idempotency.begin(tenant.id, key);
+    if (replay) {
+      await reply.status(replay.status).send(replay.body);
       return;
     }
 
-    const chain = str(req.body, "chain");
-    const asset = str(req.body, "asset");
-    const amount = str(req.body, "amount");
-    const destination = str(req.body, "destination");
+    try {
+      const chain = str(req.body, "chain");
+      const asset = str(req.body, "asset");
+      const amount = str(req.body, "amount");
+      const destination = str(req.body, "destination");
 
-    const result = await engine.payouts.payout({
-      tenant: tenant.id,
-      merchant: id,
-      chain,
-      asset,
-      amountBaseUnits: BigInt(amount),
-      destination,
-      idempotencyKey: idemKey,
-    });
-    const body = { txId: result.txId, from: result.from, status: result.status };
-    idempotency.set(idemKey, { status: 200, body });
-    await reply.send(body);
+      const result = await engine.payouts.payout({
+        tenant: tenant.id,
+        merchant: id,
+        chain,
+        asset,
+        amountBaseUnits: BigInt(amount),
+        destination,
+        idempotencyKey: `${tenant.id}:${key}`,
+      });
+      const body = { txId: result.txId, from: result.from, status: result.status };
+      await engine.idempotency.complete(tenant.id, key, 200, body);
+      await reply.send(body);
+    } catch (err) {
+      // Failed request → release the reservation so it can be retried.
+      await engine.idempotency.release(tenant.id, key);
+      throw err;
+    }
   });
 
   return app;

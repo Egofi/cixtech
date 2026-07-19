@@ -1,6 +1,7 @@
 import {
   FetchHttpClient,
   PolicyEngine,
+  TronAdapter,
   TronBalanceProvider,
   TronPayoutBroadcaster,
   deriveTronAddress,
@@ -11,6 +12,10 @@ import { HDKey } from "@scure/bip32";
 import { buildApp } from "./app.js";
 import { buildEngine } from "./engine.js";
 import { applySchemas, pgliteClient } from "./sql.js";
+import { FetchWebhookPoster } from "./webhooks.js";
+
+const TRON_SOLIDIFIED_CONFIRMATIONS = 19;
+const DETECTION_INTERVAL_MS = 15_000;
 
 function required(name: string): string {
   const v = process.env[name];
@@ -39,6 +44,11 @@ async function main(): Promise<void> {
   const signer = makeTronSigner(accountXprv);
   const engineXpub = HDKey.fromExtendedKey(accountXprv).publicExtendedKey;
   const allowlist = new Set((env["CIXTECH_PAYOUT_ALLOWLIST"] ?? "").split(",").filter(Boolean));
+  const tron = new TronAdapter(http, {
+    baseUrl: rpc,
+    confirmations: TRON_SOLIDIFIED_CONFIRMATIONS,
+    ...(apiKey ? { apiKey } : {}),
+  });
 
   const engine = buildEngine({
     sql: pgliteClient(db),
@@ -53,6 +63,8 @@ async function main(): Promise<void> {
       maxPerPayoutBaseUnits: BigInt(env["CIXTECH_MAX_PAYOUT"] ?? "1000000000"),
       allowlist,
     }),
+    depositSource: { fetchInbound: (_chain, address) => tron.fetchInboundTrc20(address) },
+    webhookPoster: new FetchWebhookPoster(),
     engineXpub,
     deriveAddress: (_chain, xpub, index) => deriveTronAddress(xpub, index),
     feeBasisPoints: Number(env["CIXTECH_FEE_BPS"] ?? "50"),
@@ -61,6 +73,13 @@ async function main(): Promise<void> {
   const app = buildApp(engine);
   const port = Number(env["PORT"] ?? "3000");
   await app.listen({ port, host: "0.0.0.0" });
+
+  // Detection loop: poll for confirmed deposits and fire webhooks.
+  setInterval(() => {
+    void engine.watcher
+      .pollOnce("TRON")
+      .catch((err) => console.error("detection poll failed", err));
+  }, DETECTION_INTERVAL_MS);
 }
 
 main().catch((err) => {

@@ -109,6 +109,14 @@ export class SqlPoolStore implements PoolStore {
     return r.rows.map(toRow);
   }
 
+  async activeAddresses(chain: string): Promise<PoolAddressRow[]> {
+    const r = await this.sql.query<Row>(
+      `SELECT ${COLS} FROM pool_address WHERE chain = $1 AND state IN ('RESERVED', 'IN_USE')`,
+      [chain],
+    );
+    return r.rows.map(toRow);
+  }
+
   async setState(
     chain: string,
     address: string,

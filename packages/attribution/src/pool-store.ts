@@ -64,6 +64,8 @@ export interface PoolStore {
   findByAddress(chain: string, address: string): Promise<PoolAddressRow | null>;
   /** All of a merchant's pool addresses on a chain, ordered by derivation index. */
   addressesForMerchant(tenant: string, merchant: string, chain: string): Promise<PoolAddressRow[]>;
+  /** Addresses currently expecting or holding a deposit (RESERVED | IN_USE) — what detection watches. */
+  activeAddresses(chain: string): Promise<PoolAddressRow[]>;
   /** Guarded transition: only applies if the row is still in `from`. Returns null on a miss. */
   setState(
     chain: string,

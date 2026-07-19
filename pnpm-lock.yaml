@@ -104,6 +104,9 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
+      '@cixtech/mpc':
+        specifier: workspace:*
+        version: link:../mpc
       '@electric-sql/pglite':
         specifier: ^0.5.4
         version: 0.5.4
@@ -125,6 +128,18 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.5.4
         version: 0.5.4
+
+  packages/mpc:
+    dependencies:
+      '@cixtech/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@cixtech/signing':
+        specifier: workspace:*
+        version: link:../signing
+      '@noble/curves':
+        specifier: ^1.7.0
+        version: 1.9.7
 
   packages/signing:
     dependencies:

@@ -93,6 +93,20 @@ export class SqlPoolStore implements PoolStore {
     return r.rows[0] ? toRow(r.rows[0]) : null;
   }
 
+  async addressesForMerchant(
+    tenant: string,
+    merchant: string,
+    chain: string,
+  ): Promise<PoolAddressRow[]> {
+    const r = await this.sql.query<Row>(
+      `SELECT ${COLS} FROM pool_address
+       WHERE tenant = $1 AND merchant = $2 AND chain = $3
+       ORDER BY derivation_index`,
+      [tenant, merchant, chain],
+    );
+    return r.rows.map(toRow);
+  }
+
   async setState(
     chain: string,
     address: string,

@@ -14,6 +14,7 @@ import { PayoutService } from "../src/payout/payout-service.js";
 import { PolicyEngine } from "../src/payout/policy.js";
 import { TronPayoutBroadcaster } from "../src/payout/tron-broadcaster.js";
 import { RawTronSigner } from "../src/tron/raw-tron-signer.js";
+import { fundedGatherer } from "./pool-fixture.js";
 
 // The full guarded payout, LIVE: policy → ledger lock → REAL broadcast on Nile →
 // ledger settle, as one PayoutService.payout() call. Ledger and chain move
@@ -45,7 +46,8 @@ describe.skipIf(!RUN)("LIVE guarded payout (gated on CIXTECH_LIVE_GUARDED)", () 
   it("policy → lock → real Nile broadcast → settle, in one call", async () => {
     const db = new PGlite();
     await db.exec(LEDGER_SCHEMA_SQL);
-    const ledger = new LedgerService(new SqlLedgerStore(wrap(db)));
+    const sql = wrap(db);
+    const ledger = new LedgerService(new SqlLedgerStore(sql));
     // Seed the merchant with a deposit so there is a balance to pay out.
     await ledger.post(
       depositFinalized({
@@ -61,6 +63,13 @@ describe.skipIf(!RUN)("LIVE guarded payout (gated on CIXTECH_LIVE_GUARDED)", () 
     );
 
     const signer = new RawTronSigner(PK as string);
+    // Pool holds the hot-key's address; the gatherer selects it as the source.
+    const gatherer = await fundedGatherer(db, sql, {
+      tenant: "t1",
+      merchant: "m1",
+      chain: "TRON",
+      address: signer.address,
+    });
     const service = new PayoutService(
       ledger,
       new PolicyEngine({ maxPerPayoutBaseUnits: 5_000_000n, allowlist: new Set([DEST]) }),
@@ -69,6 +78,7 @@ describe.skipIf(!RUN)("LIVE guarded payout (gated on CIXTECH_LIVE_GUARDED)", () 
         tokenContracts: { USDT: NILE_USDT },
         feeLimitSun: 100_000_000,
       }),
+      gatherer,
     );
 
     const res = await service.payout({
@@ -78,7 +88,6 @@ describe.skipIf(!RUN)("LIVE guarded payout (gated on CIXTECH_LIVE_GUARDED)", () 
       asset: "USDT",
       amountBaseUnits: 1_000_000n,
       destination: DEST,
-      fromAddress: signer.address,
       idempotencyKey: `live-${Date.now()}`,
     });
 

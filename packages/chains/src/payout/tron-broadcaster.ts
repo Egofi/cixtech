@@ -1,5 +1,5 @@
+import type { Signer } from "@cixtech/signing";
 import type { HttpClient } from "../http.js";
-import type { TronTxSigner } from "../tron/raw-tron-signer.js";
 import { abiEncodeTransfer, tronAddressToHex } from "../tron/tron-encoding.js";
 import type { BroadcastResult, PayoutBroadcaster, PayoutRequest } from "./broadcaster.js";
 
@@ -36,7 +36,7 @@ interface BroadcastResponse {
 export class TronPayoutBroadcaster implements PayoutBroadcaster {
   constructor(
     private readonly http: HttpClient,
-    private readonly signer: TronTxSigner,
+    private readonly signer: Signer,
     private readonly config: TronBroadcasterConfig,
   ) {}
 
@@ -46,7 +46,12 @@ export class TronPayoutBroadcaster implements PayoutBroadcaster {
 
   async send(req: PayoutRequest): Promise<BroadcastResult> {
     const tx = req.asset === "TRX" ? await this.buildNative(req) : await this.buildTrc20(req);
-    const signature = this.signer.signTxId(tx.txID);
+    // The txID is already the 32-byte sha256 of raw_data; sign it with the key
+    // that controls fromAddress (its Signer index) — HD pool key, or MPC later.
+    const hash = Uint8Array.from(Buffer.from(tx.txID, "hex"));
+    const signature = Buffer.from(this.signer.signHash(req.fromDerivationIndex, hash)).toString(
+      "hex",
+    );
     const res = await this.http.postJson<BroadcastResponse>(
       `${this.config.baseUrl}/wallet/broadcasttransaction`,
       { ...tx, signature: [signature] },

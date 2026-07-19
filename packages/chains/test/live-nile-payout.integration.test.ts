@@ -30,6 +30,7 @@ describe.skipIf(!RUN)("LIVE Nile payout (gated on CIXTECH_LIVE_PAYOUT)", () => {
       asset: "USDT",
       amountBaseUnits,
       fromAddress: signer.address,
+      fromDerivationIndex: 0, // raw hot key — index-agnostic
       toAddress,
     });
 

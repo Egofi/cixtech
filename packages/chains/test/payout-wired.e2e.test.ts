@@ -6,6 +6,7 @@ import {
   splitFee,
 } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
+import type { Signer } from "@cixtech/signing";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
 import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
@@ -13,8 +14,8 @@ import type { HttpClient } from "../src/http.js";
 import { PayoutService } from "../src/payout/payout-service.js";
 import { PolicyEngine } from "../src/payout/policy.js";
 import { TronPayoutBroadcaster } from "../src/payout/tron-broadcaster.js";
-import type { TronTxSigner } from "../src/tron/raw-tron-signer.js";
 import { abiEncodeTransfer, tronAddressToHex } from "../src/tron/tron-encoding.js";
+import { fundedGatherer } from "./pool-fixture.js";
 
 // Real, checksum-valid Tron addresses (the encoder validates them).
 const FROM = "TJkyXySVnHjqo6VDoRNxUoCh524ViKuv5h";
@@ -55,12 +56,17 @@ class FakeHttp implements HttpClient {
   }
 }
 
-const signer: TronTxSigner = { address: FROM, signTxId: () => "ab".repeat(65) };
+// A Signer whose signature is a recognizable 65-byte pattern (0xab…).
+const signer: Signer = {
+  deriveAddress: () => FROM,
+  signHash: () => Uint8Array.from(new Array(65).fill(0xab)),
+};
 
-async function fundedLedger() {
+async function setup() {
   const db = new PGlite();
   await db.exec(LEDGER_SCHEMA_SQL);
-  const ledger = new LedgerService(new SqlLedgerStore(wrap(db)));
+  const sql = wrap(db);
+  const ledger = new LedgerService(new SqlLedgerStore(sql));
   await ledger.post(
     depositFinalized({
       id: JournalEntryId("dep"),
@@ -73,12 +79,18 @@ async function fundedLedger() {
       feeRevenue: LedgerAccountKey("egofi_fee_revenue:t1"),
     }),
   );
-  return ledger;
+  const gatherer = await fundedGatherer(db, sql, {
+    tenant: "t1",
+    merchant: "m1",
+    chain: "TRON",
+    address: FROM,
+  });
+  return { ledger, gatherer };
 }
 
 describe("guarded payout wired to the real Tron broadcaster (offline)", () => {
-  it("runs policy → lock → build+sign+broadcast → settle as one call", async () => {
-    const ledger = await fundedLedger();
+  it("gathers the source, then policy → lock → build+sign+broadcast → settle", async () => {
+    const { ledger, gatherer } = await setup();
     const http = new FakeHttp();
     const broadcaster = new TronPayoutBroadcaster(http, signer, {
       baseUrl: "https://nile.trongrid.io",
@@ -88,7 +100,7 @@ describe("guarded payout wired to the real Tron broadcaster (offline)", () => {
       maxPerPayoutBaseUnits: 1_000_000_000n,
       allowlist: new Set([DEST]),
     });
-    const service = new PayoutService(ledger, policy, broadcaster);
+    const service = new PayoutService(ledger, policy, broadcaster, gatherer);
 
     const res = await service.payout({
       tenant: "t1",
@@ -97,10 +109,9 @@ describe("guarded payout wired to the real Tron broadcaster (offline)", () => {
       asset: "USDT",
       amountBaseUnits: 1_000_000n,
       destination: DEST,
-      fromAddress: FROM,
       idempotencyKey: "pay-1",
     });
-    expect(res).toEqual({ txId: "a".repeat(64), status: "settled" });
+    expect(res).toEqual({ txId: "a".repeat(64), status: "settled", from: FROM });
 
     // The broadcaster built the correct TRC20 transfer and then broadcast it signed.
     const trigger = http.calls.find((c) => c.url.endsWith("/triggersmartcontract"))?.body;

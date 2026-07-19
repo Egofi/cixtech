@@ -53,6 +53,11 @@ export class PoolManager {
     return row.address;
   }
 
+  /** All of a merchant's pool addresses on a chain (for gathering payout sources). */
+  addressesForMerchant(tenant: string, merchant: string, chain: string): Promise<PoolAddressRow[]> {
+    return this.store.addressesForMerchant(tenant, merchant, chain);
+  }
+
   /** The owning account of a deposit address, or null if unknown / not currently assigned. */
   async resolve(
     chain: string,

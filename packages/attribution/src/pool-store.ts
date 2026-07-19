@@ -62,6 +62,8 @@ export interface PoolStore {
   nextIndex(tenant: string, merchant: string, chain: string): Promise<number>;
   insertReserved(row: NewPoolAddress): Promise<PoolAddressRow>;
   findByAddress(chain: string, address: string): Promise<PoolAddressRow | null>;
+  /** All of a merchant's pool addresses on a chain, ordered by derivation index. */
+  addressesForMerchant(tenant: string, merchant: string, chain: string): Promise<PoolAddressRow[]>;
   /** Guarded transition: only applies if the row is still in `from`. Returns null on a miss. */
   setState(
     chain: string,

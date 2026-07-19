@@ -3,7 +3,10 @@ export interface PayoutRequest {
   chain: string;
   asset: string;
   amountBaseUnits: bigint;
+  /** The pool/treasury address holding the funds (chosen by gathering). */
   fromAddress: string;
+  /** The Signer derivation index whose key controls `fromAddress`. */
+  fromDerivationIndex: number;
   toAddress: string;
 }
 

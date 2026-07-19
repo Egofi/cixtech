@@ -29,16 +29,15 @@ describe("RawTronSigner", () => {
   // A throwaway key (NOT a funded one) — proves the signing primitive only.
   const PK = "0000000000000000000000000000000000000000000000000000000000000001";
 
-  it("exposes a Tron address and signs a txID that recovers to it", () => {
+  it("is a Signer whose signature recovers to its address (index-agnostic)", () => {
     const signer = new RawTronSigner(PK);
     expect(signer.address.startsWith("T")).toBe(true);
+    expect(signer.deriveAddress(0)).toBe(signer.address); // one key, any index
 
-    const txId = "abcd1234".repeat(8);
-    const sigHex = signer.signTxId(txId);
-    const sig = Uint8Array.from(Buffer.from(sigHex, "hex"));
+    const hash = Uint8Array.from(Buffer.from("abcd1234".repeat(8), "hex"));
+    const sig = signer.signHash(0, hash);
     expect(sig).toHaveLength(65);
 
-    const hash = Uint8Array.from(Buffer.from(txId, "hex"));
     const recovered = secp256k1.Signature.fromCompact(sig.subarray(0, 64))
       .addRecoveryBit(sig[64] as number)
       .recoverPublicKey(hash)

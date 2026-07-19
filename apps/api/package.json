@@ -1,0 +1,22 @@
+{
+  "name": "@cixtech/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/server.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "node --experimental-strip-types src/server.ts"
+  },
+  "dependencies": {
+    "@cixtech/attribution": "workspace:*",
+    "@cixtech/chains": "workspace:*",
+    "@cixtech/errors": "workspace:*",
+    "@cixtech/ledger": "workspace:*",
+    "@cixtech/signing": "workspace:*",
+    "@cixtech/types": "workspace:*",
+    "@electric-sql/pglite": "^0.5.4",
+    "fastify": "^5.2.0"
+  }
+}

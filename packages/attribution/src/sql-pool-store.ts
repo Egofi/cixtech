@@ -55,11 +55,13 @@ export class SqlPoolStore implements PoolStore {
     return r.rows[0] ? toRow(r.rows[0]) : null;
   }
 
-  async nextIndex(tenant: string, merchant: string, chain: string): Promise<number> {
+  async nextIndex(_tenant: string, _merchant: string, chain: string): Promise<number> {
+    // Global per chain: one engine signing key derives every merchant's addresses,
+    // so indices must be unique across merchants (two accounts at index 0 would
+    // collide on the same address). Per-merchant key domains would scope this.
     const r = await this.sql.query<{ next: number }>(
-      `SELECT COALESCE(MAX(derivation_index) + 1, 0) AS next
-       FROM pool_address WHERE tenant = $1 AND merchant = $2 AND chain = $3`,
-      [tenant, merchant, chain],
+      "SELECT COALESCE(MAX(derivation_index) + 1, 0) AS next FROM pool_address WHERE chain = $1",
+      [chain],
     );
     return Number(r.rows[0]?.next ?? 0);
   }

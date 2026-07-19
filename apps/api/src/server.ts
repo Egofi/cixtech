@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   const accountXprv = required("CIXTECH_ENGINE_XPRV");
   const rpc = required("TRON_RPC_URL");
   const usdt = env["TRON_USDT_ADDRESS"];
-  const tokenContracts = usdt ? { USDT: usdt } : {};
+  const tokenContracts: Record<string, string> = usdt ? { USDT: usdt } : {};
   const apiKey = env["TRONGRID_API_KEY"];
 
   const db = new PGlite(env["CIXTECH_DB_PATH"]);
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     feeBasisPoints: Number(env["CIXTECH_FEE_BPS"] ?? "50"),
   });
 
-  const app = buildApp(engine);
+  const app = await buildApp(engine);
   const port = Number(env["PORT"] ?? "3000");
   await app.listen({ port, host: "0.0.0.0" });
 

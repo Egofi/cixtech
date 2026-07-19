@@ -104,7 +104,12 @@ describe("tenant API", () => {
       method: "POST",
       url: `/v1/accounts/${accountId}/withdrawals`,
       headers: { ...auth(apiKey), "idempotency-key": "w2" },
-      payload: { chain: "TRON", asset: "USDT", amount: "1000000", destination: "TStranger" },
+      payload: {
+        chain: "TRON",
+        asset: "USDT",
+        amount: "1000000",
+        destination: "TJkyXySVnHjqo6VDoRNxUoCh524ViKuv5h",
+      },
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe("POLICY_DENIED");
@@ -173,7 +178,12 @@ describe("tenant API", () => {
       method: "POST",
       url: `/v1/accounts/${accountId}/withdrawals`,
       headers,
-      payload: { chain: "TRON", asset: "USDT", amount: "1000000", destination: "TStranger" },
+      payload: {
+        chain: "TRON",
+        asset: "USDT",
+        amount: "1000000",
+        destination: "TJkyXySVnHjqo6VDoRNxUoCh524ViKuv5h",
+      },
     });
     expect(bad.statusCode).toBe(403);
 

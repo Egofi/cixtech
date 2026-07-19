@@ -19,7 +19,7 @@ export class TronBalanceProvider implements AddressBalance {
   ) {}
 
   async balance(_chain: string, address: string, asset: string): Promise<bigint> {
-    const headers = this.apiKey ? { "TRON-PRO-API-KEY": this.apiKey } : {};
+    const headers: Record<string, string> = this.apiKey ? { "TRON-PRO-API-KEY": this.apiKey } : {};
     const res = await this.http.getJson<AccountResponse>(
       `${this.baseUrl}/v1/accounts/${address}`,
       headers,

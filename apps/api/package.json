@@ -17,6 +17,9 @@
     "@cixtech/signing": "workspace:*",
     "@cixtech/types": "workspace:*",
     "@electric-sql/pglite": "^0.5.4",
-    "fastify": "^5.2.0"
+    "@fastify/swagger": "^9",
+    "@fastify/swagger-ui": "^5",
+    "fastify": "^5.2.0",
+    "prom-client": "^15"
   }
 }

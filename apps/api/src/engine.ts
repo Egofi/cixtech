@@ -40,6 +40,7 @@ export interface EngineConfig {
 }
 
 export interface Engine {
+  sql: SqlClient;
   tenants: TenantStore;
   ledger: LedgerService;
   pool: PoolManager;
@@ -69,6 +70,7 @@ export function buildEngine(cfg: EngineConfig): Engine {
   const watcher = new DepositWatcher(pool, cfg.depositSource, ingestor, webhooks);
 
   return {
+    sql: cfg.sql,
     tenants: new TenantStore(cfg.sql),
     ledger,
     pool,

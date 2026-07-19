@@ -1,52 +1,82 @@
 import { randomUUID } from "node:crypto";
 import { AppError, type ErrorSink, InMemoryErrorSink, captureError } from "@cixtech/errors";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import fastifySwagger from "@fastify/swagger";
+import fastifySwaggerUi from "@fastify/swagger-ui";
+import Fastify, {
+  type FastifyError,
+  type FastifyInstance,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from "fastify";
 import type { Engine } from "./engine.js";
+import { installMetrics } from "./metrics.js";
+import {
+  balanceSchema,
+  createAccountSchema,
+  depositAddressSchema,
+  setWebhookSchema,
+  withdrawalSchema,
+} from "./schemas.js";
 import { type Tenant, UnauthorizedError } from "./stores.js";
-
-class BadRequestError extends AppError {
-  readonly code = "BAD_REQUEST";
-}
 
 const STATUS: Record<string, number> = {
   UNAUTHORIZED: 401,
   ACCOUNT_NOT_FOUND: 404,
   POLICY_DENIED: 403,
   BAD_REQUEST: 400,
+  VALIDATION: 400,
   LEDGER_INSUFFICIENT_FUNDS: 409,
   POOL_INSUFFICIENT_FUNDS: 409,
 };
 
 const WEBHOOK_SECRET_PREFIX = "cxs_";
+const DEFAULT_LOGGER: FastifyServerOptions["logger"] = {
+  level: process.env["LOG_LEVEL"] ?? "info",
+};
 
 const header = (req: FastifyRequest, name: string): string | undefined => {
   const v = req.headers[name];
   return typeof v === "string" ? v : undefined;
 };
 
-function str(body: unknown, field: string): string {
-  const v = (body as Record<string, unknown>)?.[field];
-  if (typeof v !== "string" || v.length === 0) {
-    throw new BadRequestError(`Missing or invalid field: ${field}`, { exposable: true });
-  }
-  return v;
-}
+/** Auth is skipped for operational, non-tenant routes. */
+const isPublic = (url: string): boolean =>
+  url === "/health" || url === "/ready" || url === "/metrics" || url.startsWith("/docs");
 
 export interface AppOptions {
   errorSink?: ErrorSink;
+  logger?: FastifyServerOptions["logger"];
 }
 
 /**
- * The tenant-facing HTTP API (build spec §16). All routes are API-key
- * authenticated and tenant-isolated. Tenant onboarding (creating a tenant + key)
- * is an ops concern, not exposed here. Fastify is the HTTP engine; a NestJS
- * module wrapper is a later structural option.
+ * The tenant-facing HTTP API (build spec §16). Every route is JSON-Schema
+ * validated (which also generates the OpenAPI spec at /docs), API-key
+ * authenticated, and tenant-isolated. Structured pino logs, Prometheus metrics
+ * at /metrics, and /health + /ready round out the operational surface. Fastify is
+ * the HTTP engine (bare, deliberately — see repo notes on NestJS).
  */
-export function buildApp(engine: Engine, opts: AppOptions = {}): FastifyInstance {
-  const app = Fastify({ logger: false });
+export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<FastifyInstance> {
+  const app = Fastify({
+    logger: opts.logger ?? DEFAULT_LOGGER,
+    // Reject unknown body fields (additionalProperties:false) rather than silently
+    // stripping them — a wrong field name should fail loudly, not vanish.
+    ajv: { customOptions: { removeAdditional: false } },
+  });
   const errorSink = opts.errorSink ?? new InMemoryErrorSink();
   const authed = new WeakMap<FastifyRequest, Tenant>();
+
+  await app.register(fastifySwagger, {
+    openapi: {
+      info: { title: "cixtech Custody API", version: "0.1.0" },
+      components: {
+        securitySchemes: { apiKey: { type: "apiKey", name: "x-api-key", in: "header" } },
+      },
+      security: [{ apiKey: [] }],
+    },
+  });
+  await app.register(fastifySwaggerUi, { routePrefix: "/docs" });
+  installMetrics(app);
 
   const tenantOf = (req: FastifyRequest): Tenant => {
     const t = authed.get(req);
@@ -55,12 +85,18 @@ export function buildApp(engine: Engine, opts: AppOptions = {}): FastifyInstance
   };
 
   app.addHook("onRequest", async (req) => {
-    if (req.url === "/health") return;
+    if (isPublic(req.url.split("?")[0] ?? req.url)) return;
     authed.set(req, await engine.tenants.authenticate(header(req, "x-api-key")));
   });
 
-  app.setErrorHandler(async (err, _req, reply) => {
+  app.setErrorHandler(async (err: FastifyError, _req, reply) => {
     const record = await captureError(errorSink, err);
+    if (err.validation) {
+      await reply
+        .status(400)
+        .send({ error: { id: record.id, code: "VALIDATION", message: err.message } });
+      return;
+    }
     if (err instanceof AppError) {
       await reply.status(STATUS[err.code] ?? 400).send({ error: err.toPublic() });
       return;
@@ -70,45 +106,57 @@ export function buildApp(engine: Engine, opts: AppOptions = {}): FastifyInstance
       .send({ error: { id: record.id, code: "INTERNAL", message: "Internal error" } });
   });
 
-  app.get("/health", async () => ({ status: "ok" }));
+  app.get("/health", { schema: { hide: true } }, async () => ({ status: "ok" }));
 
-  // Configure the tenant's outbound webhook. The HMAC secret is returned ONCE.
-  app.put("/v1/webhook", async (req, reply) => {
+  app.get("/ready", { schema: { hide: true } }, async (_req, reply) => {
+    try {
+      await engine.sql.query("SELECT 1");
+      return { status: "ready" };
+    } catch {
+      await reply.status(503).send({ status: "unavailable" });
+      return reply;
+    }
+  });
+
+  app.put("/v1/webhook", { schema: setWebhookSchema }, async (req, reply) => {
     const tenant = tenantOf(req);
-    const url = str(req.body, "url");
+    const { url } = req.body as { url: string };
     const secret = `${WEBHOOK_SECRET_PREFIX}${randomUUID().replace(/-/g, "")}`;
     await engine.webhookEndpoints.set(tenant.id, url, secret);
     await reply.status(201).send({ url, secret });
   });
 
-  // Create a sub-account (a tenant's merchant).
-  app.post("/v1/accounts", async (req, reply) => {
+  app.post("/v1/accounts", { schema: createAccountSchema }, async (req, reply) => {
     const tenant = tenantOf(req);
-    const externalRef = (req.body as Record<string, unknown>)?.["externalRef"];
-    const account = await engine.tenants.createAccount(
-      tenant.id,
-      typeof externalRef === "string" ? externalRef : null,
-    );
+    const { externalRef } = (req.body ?? {}) as { externalRef?: string };
+    const account = await engine.tenants.createAccount(tenant.id, externalRef ?? null);
     await reply.status(201).send({ id: account.id, externalRef: account.externalRef });
   });
 
-  // Assign a pooled deposit address for a chain.
-  app.post("/v1/accounts/:id/deposit-addresses", async (req, reply) => {
-    const tenant = tenantOf(req);
-    const { id } = req.params as { id: string };
-    await engine.tenants.requireAccount(tenant.id, id);
-    const chain = str(req.body, "chain");
-    const address = await engine.pool.assign(tenant.id, id, chain, randomUUID(), engine.engineXpub);
-    await reply.status(201).send({ address, chain });
-  });
+  app.post(
+    "/v1/accounts/:id/deposit-addresses",
+    { schema: depositAddressSchema },
+    async (req, reply) => {
+      const tenant = tenantOf(req);
+      const { id } = req.params as { id: string };
+      await engine.tenants.requireAccount(tenant.id, id);
+      const { chain } = req.body as { chain: string };
+      const address = await engine.pool.assign(
+        tenant.id,
+        id,
+        chain,
+        randomUUID(),
+        engine.engineXpub,
+      );
+      await reply.status(201).send({ address, chain });
+    },
+  );
 
-  // Per-asset available balance.
-  app.get("/v1/accounts/:id/balance", async (req, reply) => {
+  app.get("/v1/accounts/:id/balance", { schema: balanceSchema }, async (req, reply) => {
     const tenant = tenantOf(req);
     const { id } = req.params as { id: string };
     await engine.tenants.requireAccount(tenant.id, id);
-    const asset = (req.query as Record<string, unknown>)?.["asset"];
-    if (typeof asset !== "string") throw new BadRequestError("asset query param required");
+    const { asset } = req.query as { asset: string };
     const available = await engine.ledger.availableBalance(
       LedgerAccountKey(`merchant_available:${tenant.id}:${id}`),
       Asset(asset),
@@ -116,16 +164,12 @@ export function buildApp(engine: Engine, opts: AppOptions = {}): FastifyInstance
     await reply.send({ asset: asset.toUpperCase(), available: available.toString() });
   });
 
-  // Request a payout (guarded: policy → gather → lock → sign+broadcast → settle).
-  app.post("/v1/accounts/:id/withdrawals", async (req, reply) => {
+  app.post("/v1/accounts/:id/withdrawals", { schema: withdrawalSchema }, async (req, reply) => {
     const tenant = tenantOf(req);
     const { id } = req.params as { id: string };
     await engine.tenants.requireAccount(tenant.id, id);
+    const key = header(req, "idempotency-key") as string; // required by schema
 
-    const key = header(req, "idempotency-key");
-    if (!key) throw new BadRequestError("Idempotency-Key header required");
-
-    // Reserve the key; a repeat replays the stored response (or 409 if in progress).
     const replay = await engine.idempotency.begin(tenant.id, key);
     if (replay) {
       await reply.status(replay.status).send(replay.body);
@@ -133,11 +177,12 @@ export function buildApp(engine: Engine, opts: AppOptions = {}): FastifyInstance
     }
 
     try {
-      const chain = str(req.body, "chain");
-      const asset = str(req.body, "asset");
-      const amount = str(req.body, "amount");
-      const destination = str(req.body, "destination");
-
+      const { chain, asset, amount, destination } = req.body as {
+        chain: string;
+        asset: string;
+        amount: string;
+        destination: string;
+      };
       const result = await engine.payouts.payout({
         tenant: tenant.id,
         merchant: id,
@@ -151,11 +196,11 @@ export function buildApp(engine: Engine, opts: AppOptions = {}): FastifyInstance
       await engine.idempotency.complete(tenant.id, key, 200, body);
       await reply.send(body);
     } catch (err) {
-      // Failed request → release the reservation so it can be retried.
       await engine.idempotency.release(tenant.id, key);
       throw err;
     }
   });
 
+  await app.ready();
   return app;
 }

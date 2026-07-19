@@ -69,7 +69,15 @@ export async function makeApi(o: Overrides = {}) {
     feeBasisPoints: 50,
   });
   const { tenant, apiKey } = await engine.tenants.createTenant("acme");
-  return { db, sql, engine, broadcaster, tenant, apiKey, app: buildApp(engine) };
+  return {
+    db,
+    sql,
+    engine,
+    broadcaster,
+    tenant,
+    apiKey,
+    app: await buildApp(engine, { logger: false }),
+  };
 }
 
 export const auth = (apiKey: string) => ({ "x-api-key": apiKey });

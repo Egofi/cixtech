@@ -38,4 +38,20 @@ CREATE TABLE IF NOT EXISTS webhook_endpoint (
   url       text NOT NULL,
   secret    text NOT NULL
 );
+
+-- Transactional outbox for at-least-once webhook delivery. Each row is the exact
+-- signed body; the dispatcher retries with backoff and dead-letters after max
+-- attempts. The body is fixed at enqueue so the HMAC signature is stable across
+-- retries and receivers can dedupe on its embedded id.
+CREATE TABLE IF NOT EXISTS webhook_delivery (
+  id           text PRIMARY KEY,
+  tenant_id    text NOT NULL,
+  body         text NOT NULL,
+  status       text NOT NULL DEFAULT 'pending', -- pending | delivered | dead
+  attempts     int  NOT NULL DEFAULT 0,
+  next_attempt timestamptz NOT NULL DEFAULT now(),
+  last_error   text,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS webhook_delivery_due ON webhook_delivery(status, next_attempt);
 `;

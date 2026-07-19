@@ -17,7 +17,12 @@ import type { DepositSource } from "./detection.js";
 import { DepositWatcher } from "./detection.js";
 import { IdempotencyStore } from "./idempotency.js";
 import { TenantStore } from "./stores.js";
-import { WebhookDeliverer, WebhookEndpointStore, type WebhookPoster } from "./webhooks.js";
+import {
+  WebhookDispatcher,
+  WebhookEndpointStore,
+  WebhookOutbox,
+  type WebhookPoster,
+} from "./webhooks.js";
 
 const COOLDOWN_MS = 30 * 60_000;
 
@@ -47,8 +52,9 @@ export interface Engine {
   payouts: PayoutService;
   ingestor: DepositIngestor;
   idempotency: IdempotencyStore;
-  webhooks: WebhookDeliverer;
   webhookEndpoints: WebhookEndpointStore;
+  webhookOutbox: WebhookOutbox;
+  webhookDispatcher: WebhookDispatcher;
   watcher: DepositWatcher;
   engineXpub: string;
 }
@@ -66,8 +72,13 @@ export function buildEngine(cfg: EngineConfig): Engine {
     pool,
   );
   const webhookEndpoints = new WebhookEndpointStore(cfg.sql);
-  const webhooks = new WebhookDeliverer(webhookEndpoints, cfg.webhookPoster);
-  const watcher = new DepositWatcher(pool, cfg.depositSource, ingestor, webhooks);
+  const webhookOutbox = new WebhookOutbox(cfg.sql);
+  const webhookDispatcher = new WebhookDispatcher(
+    webhookOutbox,
+    webhookEndpoints,
+    cfg.webhookPoster,
+  );
+  const watcher = new DepositWatcher(pool, cfg.depositSource, ingestor, webhookOutbox);
 
   return {
     sql: cfg.sql,
@@ -77,8 +88,9 @@ export function buildEngine(cfg: EngineConfig): Engine {
     payouts,
     ingestor,
     idempotency: new IdempotencyStore(cfg.sql),
-    webhooks,
     webhookEndpoints,
+    webhookOutbox,
+    webhookDispatcher,
     watcher,
     engineXpub: cfg.engineXpub,
   };

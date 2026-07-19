@@ -1,6 +1,6 @@
 import type { PoolManager } from "@cixtech/attribution";
 import type { ChainDeposit, DepositIngestor } from "@cixtech/chains";
-import type { WebhookDeliverer } from "./webhooks.js";
+import type { WebhookOutbox } from "./webhooks.js";
 
 /** Fetches CONFIRMED inbound deposits for a watched address. Injected so tests use
  * fixtures and prod uses the Tron adapter (fetchInboundTrc20 + finality). */
@@ -11,7 +11,8 @@ export interface DepositSource {
 /**
  * Detection loop (build spec §8). Polls the chain for deposits to every watched
  * pool address, credits confirmed ones through the ingestor (idempotent on
- * txId), and fires a signed `deposit.confirmed` webhook for each new credit.
+ * txId), and ENQUEUES a `deposit.confirmed` webhook to the outbox for each new
+ * credit — delivery is the dispatcher's job, so a down endpoint loses nothing.
  * `pollOnce` is the unit of work; the server runs it on an interval.
  *
  * NOTE: `source` is responsible for only returning deposits past finality (the
@@ -22,7 +23,7 @@ export class DepositWatcher {
     private readonly pool: PoolManager,
     private readonly source: DepositSource,
     private readonly ingestor: DepositIngestor,
-    private readonly webhooks: WebhookDeliverer,
+    private readonly outbox: WebhookOutbox,
   ) {}
 
   async pollOnce(chain: string): Promise<{ credited: number }> {
@@ -35,7 +36,7 @@ export class DepositWatcher {
         const res = await this.ingestor.ingestConfirmed(deposit);
         if (res.status !== "credited") continue;
         credited++;
-        await this.webhooks.deliver(addr.tenant, "deposit.confirmed", {
+        await this.outbox.enqueue(addr.tenant, "deposit.confirmed", {
           account: addr.merchant,
           chain,
           address: addr.address,

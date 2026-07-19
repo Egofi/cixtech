@@ -16,6 +16,7 @@ import { FetchWebhookPoster } from "./webhooks.js";
 
 const TRON_SOLIDIFIED_CONFIRMATIONS = 19;
 const DETECTION_INTERVAL_MS = 15_000;
+const WEBHOOK_DISPATCH_INTERVAL_MS = 5_000;
 
 function required(name: string): string {
   const v = process.env[name];
@@ -74,12 +75,19 @@ async function main(): Promise<void> {
   const port = Number(env["PORT"] ?? "3000");
   await app.listen({ port, host: "0.0.0.0" });
 
-  // Detection loop: poll for confirmed deposits and fire webhooks.
+  // Detection loop: poll for confirmed deposits (enqueues webhooks to the outbox).
   setInterval(() => {
     void engine.watcher
       .pollOnce("TRON")
       .catch((err) => console.error("detection poll failed", err));
   }, DETECTION_INTERVAL_MS);
+
+  // Webhook dispatch loop: drain the outbox with retries + dead-lettering.
+  setInterval(() => {
+    void engine.webhookDispatcher
+      .dispatchDue()
+      .catch((err) => console.error("webhook dispatch failed", err));
+  }, WEBHOOK_DISPATCH_INTERVAL_MS);
 }
 
 main().catch((err) => {

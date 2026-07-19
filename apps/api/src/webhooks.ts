@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { SqlClient } from "@cixtech/ledger";
 
 /** Posts a raw body to a tenant URL. Injected so tests record deliveries. */
@@ -60,29 +60,131 @@ export function verifyWebhook(secret: string, body: string, signature: string): 
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+const MAX_ATTEMPTS = 8;
+const BACKOFF_BASE_MS = 5_000;
+const BACKOFF_MAX_MS = 60 * 60_000;
+
+interface DueDelivery {
+  id: string;
+  tenantId: string;
+  body: string;
+  attempts: number;
+}
+
 /**
- * Delivers a signed event to a tenant's webhook endpoint (egofi's IPN pattern):
- * HMAC-SHA256 over the exact JSON body, in `x-cixtech-signature`. A tenant with no
- * endpoint configured is simply not delivered to. (At-least-once retry via a
- * transactional outbox is the next step — this delivers once, best-effort.)
+ * Transactional outbox for webhooks. `enqueue` records the EXACT body to send
+ * (with its own id + fixed ts) so the signature is stable across retries and the
+ * receiver can dedupe. The dispatcher drains it; nothing is delivered inline, so a
+ * momentarily-down tenant endpoint loses no events.
  */
-export class WebhookDeliverer {
+export class WebhookOutbox {
+  constructor(private readonly sql: SqlClient) {}
+
+  async enqueue(tenantId: string, event: string, data: Record<string, unknown>): Promise<string> {
+    const id = randomUUID();
+    const body = JSON.stringify({ id, event, data, ts: new Date().toISOString() });
+    await this.sql.query("INSERT INTO webhook_delivery (id, tenant_id, body) VALUES ($1, $2, $3)", [
+      id,
+      tenantId,
+      body,
+    ]);
+    return id;
+  }
+
+  async claimDue(now: Date, limit: number): Promise<DueDelivery[]> {
+    const r = await this.sql.query<{
+      id: string;
+      tenant_id: string;
+      body: string;
+      attempts: number;
+    }>(
+      `SELECT id, tenant_id, body, attempts FROM webhook_delivery
+       WHERE status = 'pending' AND next_attempt <= $1
+       ORDER BY next_attempt LIMIT $2`,
+      [now.toISOString(), limit],
+    );
+    return r.rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      body: row.body,
+      attempts: Number(row.attempts),
+    }));
+  }
+
+  async markDelivered(id: string): Promise<void> {
+    await this.sql.query("UPDATE webhook_delivery SET status = 'delivered' WHERE id = $1", [id]);
+  }
+
+  async recordFailure(
+    id: string,
+    attempts: number,
+    nextAttempt: Date,
+    error: string,
+    dead: boolean,
+  ): Promise<void> {
+    await this.sql.query(
+      `UPDATE webhook_delivery
+       SET attempts = $2, next_attempt = $3, last_error = $4, status = $5
+       WHERE id = $1`,
+      [id, attempts, nextAttempt.toISOString(), error.slice(0, 500), dead ? "dead" : "pending"],
+    );
+  }
+}
+
+export function backoffAt(now: Date, attempts: number): Date {
+  const delay = Math.min(BACKOFF_BASE_MS * 2 ** (attempts - 1), BACKOFF_MAX_MS);
+  return new Date(now.getTime() + delay);
+}
+
+/**
+ * Drains the webhook outbox (egofi's IPN pattern, at-least-once): claims due
+ * deliveries, signs the stored body with the tenant's secret, POSTs it, and marks
+ * it delivered — or retries with exponential backoff, dead-lettering after
+ * MAX_ATTEMPTS. A tenant with no endpoint dead-letters immediately. The server
+ * runs `dispatchDue` on an interval.
+ */
+export class WebhookDispatcher {
   constructor(
-    private readonly store: WebhookEndpointStore,
+    private readonly outbox: WebhookOutbox,
+    private readonly endpoints: WebhookEndpointStore,
     private readonly poster: WebhookPoster,
   ) {}
 
-  async deliver(
-    tenantId: string,
-    event: string,
-    data: Record<string, unknown>,
-  ): Promise<{ delivered: boolean }> {
-    const endpoint = await this.store.get(tenantId);
-    if (!endpoint) return { delivered: false };
-    const body = JSON.stringify({ event, data, ts: new Date().toISOString() });
-    const res = await this.poster.post(endpoint.url, body, {
-      "x-cixtech-signature": signWebhook(endpoint.secret, body),
-    });
-    return { delivered: res.ok };
+  async dispatchDue(
+    now: Date = new Date(),
+    limit = 50,
+  ): Promise<{ delivered: number; failed: number }> {
+    const due = await this.outbox.claimDue(now, limit);
+    let delivered = 0;
+    let failed = 0;
+
+    for (const row of due) {
+      const endpoint = await this.endpoints.get(row.tenantId);
+      const attempts = row.attempts + 1;
+      if (!endpoint) {
+        await this.outbox.recordFailure(row.id, attempts, now, "no webhook endpoint", true);
+        failed++;
+        continue;
+      }
+      try {
+        const res = await this.poster.post(endpoint.url, row.body, {
+          "x-cixtech-signature": signWebhook(endpoint.secret, row.body),
+        });
+        if (!res.ok) throw new Error(`endpoint returned ${res.status}`);
+        await this.outbox.markDelivered(row.id);
+        delivered++;
+      } catch (err) {
+        failed++;
+        const dead = attempts >= MAX_ATTEMPTS;
+        await this.outbox.recordFailure(
+          row.id,
+          attempts,
+          backoffAt(now, attempts),
+          String(err),
+          dead,
+        );
+      }
+    }
+    return { delivered, failed };
   }
 }

@@ -10,6 +10,7 @@ export * from "./tron/tron-adapter.js";
 export * from "./tron/tron-signer.js";
 export * from "./ingest/deposit-ingestor.js";
 export * from "./payout/policy.js";
+export * from "./payout/policy-store.js";
 export * from "./payout/broadcaster.js";
 export * from "./payout/payout-service.js";
 export * from "./payout/tron-broadcaster.js";

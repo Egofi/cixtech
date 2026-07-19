@@ -1,4 +1,5 @@
 import { POOL_SCHEMA_SQL } from "@cixtech/attribution";
+import { POLICY_SCHEMA_SQL } from "@cixtech/chains";
 import { LEDGER_SCHEMA_SQL } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
 import type { PGlite } from "@electric-sql/pglite";
@@ -22,5 +23,6 @@ export function pgliteClient(db: PGlite): SqlClient {
 export async function applySchemas(db: PGlite): Promise<void> {
   await db.exec(LEDGER_SCHEMA_SQL);
   await db.exec(POOL_SCHEMA_SQL);
+  await db.exec(POLICY_SCHEMA_SQL);
   await db.exec(API_SCHEMA_SQL);
 }

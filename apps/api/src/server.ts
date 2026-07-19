@@ -1,6 +1,8 @@
 import {
   FetchHttpClient,
   PolicyEngine,
+  SqlKillSwitch,
+  SqlVelocityLimiter,
   TronAdapter,
   TronBalanceProvider,
   TronPayoutBroadcaster,
@@ -41,6 +43,7 @@ async function main(): Promise<void> {
   const db = new PGlite(env["CIXTECH_DB_PATH"]);
   await applySchemas(db);
 
+  const sql = pgliteClient(db);
   const http = new FetchHttpClient();
   const signer = makeTronSigner(accountXprv);
   const engineXpub = HDKey.fromExtendedKey(accountXprv).publicExtendedKey;
@@ -52,7 +55,7 @@ async function main(): Promise<void> {
   });
 
   const engine = buildEngine({
-    sql: pgliteClient(db),
+    sql,
     broadcaster: new TronPayoutBroadcaster(http, signer, {
       baseUrl: rpc,
       tokenContracts,
@@ -60,9 +63,16 @@ async function main(): Promise<void> {
       ...(apiKey ? { apiKey } : {}),
     }),
     balances: new TronBalanceProvider(http, rpc, tokenContracts, apiKey),
+    // Durable guardrail state (survives restart, shared across nodes): kill-switch
+    // and rolling velocity cap both back onto the shared SqlClient.
     policy: new PolicyEngine({
       maxPerPayoutBaseUnits: BigInt(env["CIXTECH_MAX_PAYOUT"] ?? "1000000000"),
       allowlist,
+      killSwitch: new SqlKillSwitch(sql),
+      velocity: new SqlVelocityLimiter(sql, {
+        windowMs: Number(env["CIXTECH_VELOCITY_WINDOW_MS"] ?? String(24 * 60 * 60_000)),
+        maxTotalBaseUnits: BigInt(env["CIXTECH_VELOCITY_MAX"] ?? "10000000000"),
+      }),
     }),
     // Finality-gated: only credit deposits that have reached a solidified (irreversible) block.
     depositSource: { fetchInbound: (_chain, address) => tron.confirmedInboundTrc20(address) },

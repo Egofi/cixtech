@@ -2,12 +2,23 @@ import { secp256k1 } from "@noble/curves/secp256k1";
 import { tronAddressFromPubkey } from "./address.js";
 
 /**
+ * What the payout broadcaster needs to sign a Tron transaction: the from-address
+ * it controls, and a txID signer. RawTronSigner (a single hot key) implements it
+ * now; an HD/pool-derived signer and, later, an MPC signer implement the same
+ * interface — the broadcaster never changes (ADR 0007).
+ */
+export interface TronTxSigner {
+  readonly address: string;
+  signTxId(txIdHex: string): string;
+}
+
+/**
  * A single raw-key Tron signer — for a treasury/hot address created directly from
  * a private key rather than HD-derived. Same signing primitive as
  * `@cixtech/signing`'s KeypairSigner (65-byte recoverable secp256k1), scoped to
  * one key. The key never leaves this object.
  */
-export class RawTronSigner {
+export class RawTronSigner implements TronTxSigner {
   readonly address: string;
   private readonly privateKey: Uint8Array;
 

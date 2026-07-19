@@ -1,5 +1,5 @@
 import type { HttpClient } from "../http.js";
-import type { RawTronSigner } from "../tron/raw-tron-signer.js";
+import type { TronTxSigner } from "../tron/raw-tron-signer.js";
 import { abiEncodeTransfer, tronAddressToHex } from "../tron/tron-encoding.js";
 import type { BroadcastResult, PayoutBroadcaster, PayoutRequest } from "./broadcaster.js";
 
@@ -36,7 +36,7 @@ interface BroadcastResponse {
 export class TronPayoutBroadcaster implements PayoutBroadcaster {
   constructor(
     private readonly http: HttpClient,
-    private readonly signer: RawTronSigner,
+    private readonly signer: TronTxSigner,
     private readonly config: TronBroadcasterConfig,
   ) {}
 

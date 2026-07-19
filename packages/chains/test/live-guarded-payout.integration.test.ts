@@ -1,0 +1,95 @@
+import {
+  LEDGER_SCHEMA_SQL,
+  LedgerService,
+  SqlLedgerStore,
+  depositFinalized,
+  splitFee,
+} from "@cixtech/ledger";
+import type { SqlClient } from "@cixtech/ledger";
+import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
+import { PGlite } from "@electric-sql/pglite";
+import { describe, expect, it } from "vitest";
+import { FetchHttpClient } from "../src/http.js";
+import { PayoutService } from "../src/payout/payout-service.js";
+import { PolicyEngine } from "../src/payout/policy.js";
+import { TronPayoutBroadcaster } from "../src/payout/tron-broadcaster.js";
+import { RawTronSigner } from "../src/tron/raw-tron-signer.js";
+
+// The full guarded payout, LIVE: policy → ledger lock → REAL broadcast on Nile →
+// ledger settle, as one PayoutService.payout() call. Ledger and chain move
+// together. Gated on CIXTECH_LIVE_GUARDED + TRON_PK.
+const PK = process.env["TRON_PK"];
+const RUN = process.env["CIXTECH_LIVE_GUARDED"] && PK;
+const DEST = process.env["CIXTECH_PAYOUT_TO"] ?? "TTetbYe8bRMfz6ASefJACCb2gSzwbe9AqW";
+const NILE_USDT = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
+
+const USDT = Asset("USDT");
+const AVAILABLE = LedgerAccountKey("merchant_available:t1:m1");
+const PENDING = LedgerAccountKey("merchant_pending_withdrawal:t1:m1");
+const POOL = LedgerAccountKey("pool_addr:TRON:m1");
+
+function wrap(db: PGlite): SqlClient {
+  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
+    async query<R>(text: string, params?: readonly unknown[]) {
+      const r = await q.query(text, params ? [...params] : []);
+      return { rows: r.rows as R[] };
+    },
+    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
+      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
+    },
+  });
+  return w(db);
+}
+
+describe.skipIf(!RUN)("LIVE guarded payout (gated on CIXTECH_LIVE_GUARDED)", () => {
+  it("policy → lock → real Nile broadcast → settle, in one call", async () => {
+    const db = new PGlite();
+    await db.exec(LEDGER_SCHEMA_SQL);
+    const ledger = new LedgerService(new SqlLedgerStore(wrap(db)));
+    // Seed the merchant with a deposit so there is a balance to pay out.
+    await ledger.post(
+      depositFinalized({
+        id: JournalEntryId("dep"),
+        idempotencyKey: IdempotencyKey("dep"),
+        asset: USDT,
+        amount: 10_000_000n,
+        feeBasisPoints: 50,
+        poolAddr: POOL,
+        merchantAvailable: AVAILABLE,
+        feeRevenue: LedgerAccountKey("egofi_fee_revenue:t1"),
+      }),
+    );
+
+    const signer = new RawTronSigner(PK as string);
+    const service = new PayoutService(
+      ledger,
+      new PolicyEngine({ maxPerPayoutBaseUnits: 5_000_000n, allowlist: new Set([DEST]) }),
+      new TronPayoutBroadcaster(new FetchHttpClient(), signer, {
+        baseUrl: "https://nile.trongrid.io",
+        tokenContracts: { USDT: NILE_USDT },
+        feeLimitSun: 100_000_000,
+      }),
+    );
+
+    const res = await service.payout({
+      tenant: "t1",
+      merchant: "m1",
+      chain: "TRON",
+      asset: "USDT",
+      amountBaseUnits: 1_000_000n,
+      destination: DEST,
+      fromAddress: signer.address,
+      idempotencyKey: `live-${Date.now()}`,
+    });
+
+    expect(res.txId).toMatch(/^[0-9a-f]{64}$/);
+    const { net } = splitFee(10_000_000n, 50);
+    expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(net - 1_000_000n);
+    expect(await ledger.availableBalance(PENDING, USDT)).toBe(0n);
+    expect(await ledger.getBalance(POOL, USDT)).toBe(9_000_000n);
+
+    console.log(
+      `GUARDED PAYOUT 1 USDT → ${DEST}\nTXID=${res.txId}  (https://nile.tronscan.org/#/transaction/${res.txId})`,
+    );
+  }, 30_000);
+});

@@ -64,7 +64,8 @@ async function main(): Promise<void> {
       maxPerPayoutBaseUnits: BigInt(env["CIXTECH_MAX_PAYOUT"] ?? "1000000000"),
       allowlist,
     }),
-    depositSource: { fetchInbound: (_chain, address) => tron.fetchInboundTrc20(address) },
+    // Finality-gated: only credit deposits that have reached a solidified (irreversible) block.
+    depositSource: { fetchInbound: (_chain, address) => tron.confirmedInboundTrc20(address) },
     webhookPoster: new FetchWebhookPoster(),
     engineXpub,
     deriveAddress: (_chain, xpub, index) => deriveTronAddress(xpub, index),

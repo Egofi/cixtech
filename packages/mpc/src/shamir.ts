@@ -41,7 +41,7 @@ export interface Share {
   y: bigint;
 }
 
-function evalPoly(coeffs: bigint[], x: bigint): bigint {
+export function evalPoly(coeffs: bigint[], x: bigint): bigint {
   // Horner's method, mod n.
   let acc = 0n;
   for (let i = coeffs.length - 1; i >= 0; i--) acc = mod(acc * x + (coeffs[i] as bigint));

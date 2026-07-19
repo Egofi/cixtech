@@ -40,7 +40,7 @@ export class PayoutService {
 
   async payout(p: PayoutParams): Promise<PayoutResult> {
     // 1. Guard — throws PolicyDeniedError before anything moves.
-    this.policy.check({
+    await this.policy.check({
       tenant: p.tenant,
       merchant: p.merchant,
       chain: p.chain,

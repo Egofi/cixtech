@@ -55,4 +55,43 @@ export class TronAdapter implements ChainAdapter {
     const deposits = parseNativeTransfers(await this.http.getJson(url, this.headers()));
     return deposits.filter((d) => d.to === address); // credit only transfers addressed to us
   }
+
+  /** The latest SOLIDIFIED block number — Tron's finality frontier (irreversible). */
+  async solidifiedBlockNumber(): Promise<number> {
+    const d = await this.http.postJson<{ block_header?: { raw_data?: { number?: number } } }>(
+      `${this.config.baseUrl}/walletsolidity/getnowblock`,
+      {},
+      this.headers(),
+    );
+    return d.block_header?.raw_data?.number ?? 0;
+  }
+
+  /** The block a transaction landed in, or null if not yet mined. */
+  async transactionBlock(txId: string): Promise<number | null> {
+    const d = await this.http.postJson<{ blockNumber?: number }>(
+      `${this.config.baseUrl}/wallet/gettransactioninfobyid`,
+      { value: txId },
+      this.headers(),
+    );
+    return typeof d.blockNumber === "number" ? d.blockNumber : null;
+  }
+
+  /**
+   * Inbound TRC20 deposits that are FINAL — i.e. in a solidified (irreversible)
+   * block. This is what detection must credit against, since a not-yet-solidified
+   * deposit can still be reorged out. Use this as the DepositSource in production.
+   */
+  async confirmedInboundTrc20(address: string): Promise<ChainDeposit[]> {
+    const deposits = await this.fetchInboundTrc20(address);
+    if (deposits.length === 0) return [];
+    const solidified = await this.solidifiedBlockNumber();
+    const confirmed: ChainDeposit[] = [];
+    for (const deposit of deposits) {
+      const block = await this.transactionBlock(deposit.txId);
+      if (block !== null && block > 0 && block <= solidified) {
+        confirmed.push({ ...deposit, blockNumber: block });
+      }
+    }
+    return confirmed;
+  }
 }

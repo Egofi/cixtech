@@ -49,6 +49,19 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
+  packages/attribution:
+    dependencies:
+      '@cixtech/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@cixtech/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.4
+        version: 0.5.4
+
   packages/chain-config:
     dependencies:
       '@cixtech/errors':
@@ -60,6 +73,9 @@ importers:
 
   packages/chains:
     dependencies:
+      '@cixtech/attribution':
+        specifier: workspace:*
+        version: link:../attribution
       '@cixtech/errors':
         specifier: workspace:*
         version: link:../errors

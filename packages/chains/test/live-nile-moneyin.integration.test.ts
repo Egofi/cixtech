@@ -1,10 +1,11 @@
+import type { Attribution } from "@cixtech/attribution";
 import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore, splitFee } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
 import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import { FetchHttpClient } from "../src/http.js";
-import { type Attribution, DepositIngestor } from "../src/ingest/deposit-ingestor.js";
+import { DepositIngestor } from "../src/ingest/deposit-ingestor.js";
 import { TronAdapter } from "../src/tron/tron-adapter.js";
 
 // Gated on CIXTECH_LIVE_NILE. The FULL money-in round trip against LIVE Nile

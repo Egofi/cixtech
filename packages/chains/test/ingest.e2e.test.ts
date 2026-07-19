@@ -1,10 +1,11 @@
+import type { Attribution } from "@cixtech/attribution";
 import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
 import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import type { ChainDeposit } from "../src/chain-adapter.js";
-import { type Attribution, DepositIngestor } from "../src/ingest/deposit-ingestor.js";
+import { DepositIngestor } from "../src/ingest/deposit-ingestor.js";
 import { parseTrc20Response } from "../src/tron/trc20.js";
 
 const RECIPIENT = "TRecipient000000000000000000000000";

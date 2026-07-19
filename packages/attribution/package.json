@@ -1,5 +1,5 @@
 {
-  "name": "@cixtech/chains",
+  "name": "@cixtech/attribution",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,15 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@cixtech/attribution": "workspace:*",
     "@cixtech/errors": "workspace:*",
-    "@cixtech/ledger": "workspace:*",
-    "@cixtech/types": "workspace:*",
-    "@noble/curves": "^1.7.0",
-    "@noble/hashes": "^1.6.0",
-    "@scure/base": "^2.2.0",
-    "@scure/bip32": "^2.2.0",
-    "zod": "^3.24.1"
+    "@cixtech/ledger": "workspace:*"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4"

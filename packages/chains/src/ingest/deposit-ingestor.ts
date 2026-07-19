@@ -1,21 +1,11 @@
+import type { Attribution } from "@cixtech/attribution";
 import { type LedgerService, depositFinalized } from "@cixtech/ledger";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
 import type { ChainDeposit } from "../chain-adapter.js";
 
-/** Who owns a deposit address, and the fee that applies. */
-export interface AttributionEntry {
-  tenant: string;
-  merchant: string;
-  feeBasisPoints: number;
-}
-
-/**
- * Resolves an on-chain deposit address to its owning account. This is a
- * placeholder for the pooled-address attribution layer (ADR 0009); the money-in
- * slice uses a simple address book so the end-to-end flow is exercised now.
- */
-export interface Attribution {
-  resolve(chain: string, address: string): Promise<AttributionEntry | null>;
+/** Marks a credited deposit's address IN_USE — the pool lifecycle hook (ADR 0009). */
+export interface AddressLifecycle {
+  markInUse(chain: string, address: string): Promise<unknown>;
 }
 
 export type IngestStatus = "credited" | "duplicate" | "unmatched";
@@ -36,6 +26,8 @@ export class DepositIngestor {
   constructor(
     private readonly ledger: LedgerService,
     private readonly attribution: Attribution,
+    /** Optional pool lifecycle: a credited deposit moves its address RESERVED → IN_USE. */
+    private readonly lifecycle?: AddressLifecycle,
   ) {}
 
   async ingestConfirmed(d: ChainDeposit): Promise<IngestResult> {
@@ -55,6 +47,11 @@ export class DepositIngestor {
     });
 
     const { applied } = await this.ledger.post(entry);
+    if (applied && this.lifecycle) {
+      // Best-effort: the credit is committed; advancing the address state must not
+      // undo it. A RESERVED→IN_USE miss is reconciled by the pool sweeper.
+      await this.lifecycle.markInUse(d.chain, d.to).catch(() => {});
+    }
     return { status: applied ? "credited" : "duplicate", ref };
   }
 }

@@ -13,6 +13,9 @@ const adapter = new TronAdapter(
     async getJson() {
       throw new Error("unused");
     },
+    async postJson() {
+      throw new Error("unused");
+    },
   },
   { baseUrl: "http://unused", confirmations: 19 },
 );

@@ -26,7 +26,8 @@ export interface ChainConfig {
  * no-magic-constants guard forbids URL/address literals outside... nothing:
  * they live in the deployment env, not the repo.
  *
- * TODO(step1): fill BSC, ARBITRUM, BASE, POLYGON, BTC, LTC, XRP for both envs.
+ * TODO: fill BTC, LTC, XRP for both envs (EVM family — POLYGON, BSC, ARBITRUM,
+ * BASE — is complete).
  */
 const CHAINS: Record<ChainEnv, Record<string, ChainConfig>> = {
   testnet: {
@@ -43,6 +44,27 @@ const CHAINS: Record<ChainEnv, Record<string, ChainConfig>> = {
       rpcUrlEnvVar: "POLYGON_RPC_URL",
       finality: { confirmations: 50, note: "deep — reorg history" },
     },
+    BSC: {
+      chain: "BSC",
+      family: "EVM",
+      chainId: 97, // BSC testnet
+      rpcUrlEnvVar: "BSC_RPC_URL",
+      finality: { confirmations: 15, note: "fast blocks" },
+    },
+    ARBITRUM: {
+      chain: "ARBITRUM",
+      family: "EVM",
+      chainId: 421614, // Arbitrum Sepolia
+      rpcUrlEnvVar: "ARBITRUM_RPC_URL",
+      finality: { confirmations: 20, note: "L2 — true finality follows L1" },
+    },
+    BASE: {
+      chain: "BASE",
+      family: "EVM",
+      chainId: 84532, // Base Sepolia
+      rpcUrlEnvVar: "BASE_RPC_URL",
+      finality: { confirmations: 20, note: "L2 — true finality follows L1" },
+    },
   },
   mainnet: {
     TRON: {
@@ -57,6 +79,27 @@ const CHAINS: Record<ChainEnv, Record<string, ChainConfig>> = {
       chainId: 137,
       rpcUrlEnvVar: "POLYGON_RPC_URL",
       finality: { confirmations: 128, note: "deep — reorg history" },
+    },
+    BSC: {
+      chain: "BSC",
+      family: "EVM",
+      chainId: 56,
+      rpcUrlEnvVar: "BSC_RPC_URL",
+      finality: { confirmations: 15, note: "fast blocks" },
+    },
+    ARBITRUM: {
+      chain: "ARBITRUM",
+      family: "EVM",
+      chainId: 42161,
+      rpcUrlEnvVar: "ARBITRUM_RPC_URL",
+      finality: { confirmations: 20, note: "L2 — true finality follows L1" },
+    },
+    BASE: {
+      chain: "BASE",
+      family: "EVM",
+      chainId: 8453,
+      rpcUrlEnvVar: "BASE_RPC_URL",
+      finality: { confirmations: 20, note: "L2 — true finality follows L1" },
     },
   },
 };

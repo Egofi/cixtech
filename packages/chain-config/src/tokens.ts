@@ -18,29 +18,37 @@ export interface TokenConfig {
  *
  * TODO(step1): complete the token set per supported (chain, env).
  */
+/** USDC + USDT (both 6-decimal) and the native gas token (18-decimal) for one EVM chain. */
+function evmTokens(chain: string, nativeSymbol: string): Record<string, TokenConfig> {
+  return {
+    USDC: { symbol: "USDC", chain, decimals: 6, contractAddressEnvVar: `${chain}_USDC_ADDRESS` },
+    USDT: { symbol: "USDT", chain, decimals: 6, contractAddressEnvVar: `${chain}_USDT_ADDRESS` },
+    [nativeSymbol]: {
+      symbol: nativeSymbol,
+      chain,
+      decimals: 18,
+      contractAddressEnvVar: "",
+      native: true,
+    },
+  };
+}
+
+const TRON_TOKENS: Record<string, TokenConfig> = {
+  USDT: { symbol: "USDT", chain: "TRON", decimals: 6, contractAddressEnvVar: "TRON_USDT_ADDRESS" },
+  TRX: { symbol: "TRX", chain: "TRON", decimals: 6, contractAddressEnvVar: "", native: true },
+};
+
+// EVM chains share one token shape across envs; only the resolved addresses differ (§16.5).
+const EVM_TOKENS: Record<string, Record<string, TokenConfig>> = {
+  POLYGON: evmTokens("POLYGON", "POL"),
+  BSC: evmTokens("BSC", "BNB"),
+  ARBITRUM: evmTokens("ARBITRUM", "ETH"),
+  BASE: evmTokens("BASE", "ETH"),
+};
+
 const TOKENS: Record<ChainEnv, Record<string, Record<string, TokenConfig>>> = {
-  testnet: {
-    TRON: {
-      USDT: {
-        symbol: "USDT",
-        chain: "TRON",
-        decimals: 6,
-        contractAddressEnvVar: "TRON_USDT_ADDRESS",
-      },
-      TRX: { symbol: "TRX", chain: "TRON", decimals: 6, contractAddressEnvVar: "", native: true },
-    },
-  },
-  mainnet: {
-    TRON: {
-      USDT: {
-        symbol: "USDT",
-        chain: "TRON",
-        decimals: 6,
-        contractAddressEnvVar: "TRON_USDT_ADDRESS",
-      },
-      TRX: { symbol: "TRX", chain: "TRON", decimals: 6, contractAddressEnvVar: "", native: true },
-    },
-  },
+  testnet: { TRON: TRON_TOKENS, ...EVM_TOKENS },
+  mainnet: { TRON: TRON_TOKENS, ...EVM_TOKENS },
 };
 
 export function tokenConfig(env: ChainEnv, chain: string, symbol: string): TokenConfig {

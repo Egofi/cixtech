@@ -48,6 +48,9 @@ async function main(): Promise<void> {
   const signer = makeTronSigner(accountXprv);
   const engineXpub = HDKey.fromExtendedKey(accountXprv).publicExtendedKey;
   const allowlist = new Set((env["CIXTECH_PAYOUT_ALLOWLIST"] ?? "").split(",").filter(Boolean));
+  const maxPayout = env["CIXTECH_MAX_PAYOUT"] ?? "1000000000";
+  const velocityWindowMs = Number(env["CIXTECH_VELOCITY_WINDOW_MS"] ?? String(24 * 60 * 60_000));
+  const velocityMax = env["CIXTECH_VELOCITY_MAX"] ?? "10000000000";
   const tron = new TronAdapter(http, {
     baseUrl: rpc,
     confirmations: TRON_SOLIDIFIED_CONFIRMATIONS,
@@ -66,12 +69,12 @@ async function main(): Promise<void> {
     // Durable guardrail state (survives restart, shared across nodes): kill-switch
     // and rolling velocity cap both back onto the shared SqlClient.
     policy: new PolicyEngine({
-      maxPerPayoutBaseUnits: BigInt(env["CIXTECH_MAX_PAYOUT"] ?? "1000000000"),
+      maxPerPayoutBaseUnits: BigInt(maxPayout),
       allowlist,
       killSwitch: new SqlKillSwitch(sql),
       velocity: new SqlVelocityLimiter(sql, {
-        windowMs: Number(env["CIXTECH_VELOCITY_WINDOW_MS"] ?? String(24 * 60 * 60_000)),
-        maxTotalBaseUnits: BigInt(env["CIXTECH_VELOCITY_MAX"] ?? "10000000000"),
+        windowMs: velocityWindowMs,
+        maxTotalBaseUnits: BigInt(velocityMax),
       }),
     }),
     // Finality-gated: only credit deposits that have reached a solidified (irreversible) block.
@@ -82,7 +85,12 @@ async function main(): Promise<void> {
     feeBasisPoints: Number(env["CIXTECH_FEE_BPS"] ?? "50"),
   });
 
-  const app = await buildApp(engine);
+  const app = await buildApp(engine, {
+    admin: {
+      token: env["CIXTECH_ADMIN_TOKEN"],
+      limits: { maxPerPayout: maxPayout, velocityWindowMs, velocityMax },
+    },
+  });
   const port = Number(env["PORT"] ?? "3000");
   await app.listen({ port, host: "0.0.0.0" });
 

@@ -3,6 +3,7 @@ import { POLICY_SCHEMA_SQL } from "@cixtech/chains";
 import { LEDGER_SCHEMA_SQL } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
 import type { PGlite } from "@electric-sql/pglite";
+import { ADMIN_SCHEMA_SQL } from "./admin/admin-schema.js";
 import { API_SCHEMA_SQL } from "./api-schema.js";
 
 /** Wraps a PGlite instance as the shared SqlClient. Prod swaps this for a pg/Prisma client. */
@@ -25,4 +26,5 @@ export async function applySchemas(db: PGlite): Promise<void> {
   await db.exec(POOL_SCHEMA_SQL);
   await db.exec(POLICY_SCHEMA_SQL);
   await db.exec(API_SCHEMA_SQL);
+  await db.exec(ADMIN_SCHEMA_SQL);
 }

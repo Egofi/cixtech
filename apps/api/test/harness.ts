@@ -4,6 +4,7 @@ import {
   type PayoutBroadcaster,
   type PayoutRequest,
   PolicyEngine,
+  SqlKillSwitch,
   deriveTronAddress,
 } from "@cixtech/chains";
 import { PGlite } from "@electric-sql/pglite";
@@ -47,7 +48,10 @@ export interface Overrides {
   depositSource?: DepositSource;
   webhookPoster?: WebhookPoster;
   policy?: PolicyEngine;
+  adminToken?: string;
 }
+
+export const ADMIN_TOKEN = "test-admin-token";
 
 /** Build a full API + engine on a fresh PGlite, with overridable chain edges. */
 export async function makeApi(o: Overrides = {}) {
@@ -61,7 +65,13 @@ export async function makeApi(o: Overrides = {}) {
     balances: plentiful,
     policy:
       o.policy ??
-      new PolicyEngine({ maxPerPayoutBaseUnits: 1_000_000_000n, allowlist: new Set([DEST]) }),
+      new PolicyEngine({
+        maxPerPayoutBaseUnits: 1_000_000_000n,
+        allowlist: new Set([DEST]),
+        // Same durable kill-switch the admin console toggles, so admin controls
+        // actually gate tenant payouts (mirrors production wiring).
+        killSwitch: new SqlKillSwitch(sql),
+      }),
     depositSource: o.depositSource ?? noDeposits,
     webhookPoster: o.webhookPoster ?? noopPoster,
     engineXpub: ENGINE_XPUB,
@@ -76,8 +86,19 @@ export async function makeApi(o: Overrides = {}) {
     broadcaster,
     tenant,
     apiKey,
-    app: await buildApp(engine, { logger: false }),
+    app: await buildApp(engine, {
+      logger: false,
+      admin: {
+        token: o.adminToken ?? ADMIN_TOKEN,
+        limits: {
+          maxPerPayout: "1000000000",
+          velocityWindowMs: 86_400_000,
+          velocityMax: "10000000000",
+        },
+      },
+    }),
   };
 }
 
 export const auth = (apiKey: string) => ({ "x-api-key": apiKey });
+export const adminAuth = (token: string = ADMIN_TOKEN) => ({ authorization: `Bearer ${token}` });

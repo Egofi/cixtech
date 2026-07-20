@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AppError, type ErrorSink, InMemoryErrorSink, captureError } from "@cixtech/errors";
+import { AppError, type ErrorSink, captureError } from "@cixtech/errors";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
 import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
@@ -9,6 +9,9 @@ import Fastify, {
   type FastifyRequest,
   type FastifyServerOptions,
 } from "fastify";
+import { registerAdmin } from "./admin/admin-routes.js";
+import { AdminService } from "./admin/admin-service.js";
+import { SqlErrorSink } from "./admin/sql-error-sink.js";
 import type { Engine } from "./engine.js";
 import { installMetrics } from "./metrics.js";
 import {
@@ -40,14 +43,27 @@ const header = (req: FastifyRequest, name: string): string | undefined => {
   return typeof v === "string" ? v : undefined;
 };
 
-/** Auth is skipped for operational, non-tenant routes. */
+/** Auth is skipped for operational and admin-plane routes (admin has its own auth). */
 const isPublic = (url: string): boolean =>
-  url === "/health" || url === "/ready" || url === "/metrics" || url.startsWith("/docs");
+  url === "/health" ||
+  url === "/ready" ||
+  url === "/metrics" ||
+  url.startsWith("/docs") ||
+  url.startsWith("/admin");
+
+export interface AdminPlaneOptions {
+  /** Super-admin bearer token. When unset, the admin plane is disabled. */
+  token?: string | undefined;
+  limits?: { maxPerPayout: string; velocityWindowMs: number; velocityMax: string };
+}
 
 export interface AppOptions {
   errorSink?: ErrorSink;
   logger?: FastifyServerOptions["logger"];
+  admin?: AdminPlaneOptions;
 }
+
+const DEFAULT_LIMITS = { maxPerPayout: "0", velocityWindowMs: 0, velocityMax: "0" };
 
 /**
  * The tenant-facing HTTP API (build spec §16). Every route is JSON-Schema
@@ -63,7 +79,8 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     // stripping them — a wrong field name should fail loudly, not vanish.
     ajv: { customOptions: { removeAdditional: false } },
   });
-  const errorSink = opts.errorSink ?? new InMemoryErrorSink();
+  // Default to the durable SQL sink so the ADR 0012 trail is queryable in the admin console.
+  const errorSink = opts.errorSink ?? new SqlErrorSink(engine.sql);
   const authed = new WeakMap<FastifyRequest, Tenant>();
 
   await app.register(fastifySwagger, {
@@ -200,6 +217,12 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
       throw err;
     }
   });
+
+  // Admin console + control plane (ADR 0015): separate bearer auth, all-tenant
+  // reads, safe audited controls. Registered even when disabled so /admin returns
+  // a clear "disabled" 401 rather than a 404.
+  const adminService = new AdminService(engine.sql, engine, opts.admin?.limits ?? DEFAULT_LIMITS);
+  registerAdmin(app, { service: adminService, token: opts.admin?.token });
 
   await app.ready();
   return app;

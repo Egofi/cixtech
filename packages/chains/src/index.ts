@@ -1,4 +1,5 @@
 export * from "./chain-adapter.js";
+export * from "./chain-router.js";
 export * from "./http.js";
 export * from "./tron/address.js";
 export * from "./tron/trc20.js";

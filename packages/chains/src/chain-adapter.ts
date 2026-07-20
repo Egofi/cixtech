@@ -22,6 +22,15 @@ export interface ChainDeposit {
 }
 
 /**
+ * Fetches CONFIRMED inbound deposits for a watched address (past finality). The
+ * source owns the finality rule for its chain (Tron: solidified block; EVM:
+ * confirmation depth), so the detection loop can trust whatever it returns.
+ */
+export interface DepositSource {
+  fetchInbound(chain: string, address: string): Promise<ChainDeposit[]>;
+}
+
+/**
  * One chain family behind one interface (spec §4). The core never knows which
  * chain it's on. `parseDeposits` must be idempotent on `(txId, index)`.
  */

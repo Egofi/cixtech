@@ -1,6 +1,8 @@
 import type { AddressBalance } from "@cixtech/attribution";
 import {
   type BroadcastResult,
+  ChainRouter,
+  type DepositSource,
   type PayoutBroadcaster,
   type PayoutRequest,
   PolicyEngine,
@@ -10,7 +12,6 @@ import {
 import { PGlite } from "@electric-sql/pglite";
 import { HDKey } from "@scure/bip32";
 import { buildApp } from "../src/app.js";
-import type { DepositSource } from "../src/detection.js";
 import { buildEngine } from "../src/engine.js";
 import { applySchemas, pgliteClient } from "../src/sql.js";
 import type { WebhookPoster } from "../src/webhooks.js";
@@ -49,9 +50,28 @@ export interface Overrides {
   webhookPoster?: WebhookPoster;
   policy?: PolicyEngine;
   adminToken?: string;
+  /** Extra chain plugins to register beyond the default TRON fake (for multi-chain tests). */
+  extraChains?: ConstructorParameters<typeof ChainRouter>[0];
 }
 
 export const ADMIN_TOKEN = "test-admin-token";
+
+/** A one-chain (or more) router of fakes, mirroring how prod wires the real router. */
+function fakeRouter(o: Overrides, broadcaster: PayoutBroadcaster): ChainRouter {
+  const router = new ChainRouter([
+    {
+      chain: "TRON",
+      family: "TRON",
+      confirmations: 19,
+      broadcaster,
+      balances: plentiful,
+      depositSource: o.depositSource ?? noDeposits,
+      deriveAddress: (xpub, index) => deriveTronAddress(xpub, index),
+    },
+  ]);
+  for (const plugin of o.extraChains ?? []) router.register(plugin);
+  return router;
+}
 
 /** Build a full API + engine on a fresh PGlite, with overridable chain edges. */
 export async function makeApi(o: Overrides = {}) {
@@ -61,8 +81,7 @@ export async function makeApi(o: Overrides = {}) {
   const broadcaster = new FakeBroadcaster();
   const engine = buildEngine({
     sql,
-    broadcaster,
-    balances: plentiful,
+    chains: fakeRouter(o, broadcaster),
     policy:
       o.policy ??
       new PolicyEngine({
@@ -72,10 +91,8 @@ export async function makeApi(o: Overrides = {}) {
         // actually gate tenant payouts (mirrors production wiring).
         killSwitch: new SqlKillSwitch(sql),
       }),
-    depositSource: o.depositSource ?? noDeposits,
     webhookPoster: o.webhookPoster ?? noopPoster,
     engineXpub: ENGINE_XPUB,
-    deriveAddress: (_chain, xpub, index) => deriveTronAddress(xpub, index),
     feeBasisPoints: 50,
   });
   const { tenant, apiKey } = await engine.tenants.createTenant("acme");

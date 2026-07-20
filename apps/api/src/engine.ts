@@ -1,19 +1,12 @@
+import { PoolGatherer, PoolManager, PooledAttribution, SqlPoolStore } from "@cixtech/attribution";
 import {
-  type AddressBalance,
-  PoolGatherer,
-  PoolManager,
-  PooledAttribution,
-  SqlPoolStore,
-} from "@cixtech/attribution";
-import {
+  type ChainRouter,
   DepositIngestor,
-  type PayoutBroadcaster,
   PayoutService,
   type PolicyEngine,
 } from "@cixtech/chains";
 import { LedgerService, SqlLedgerStore } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
-import type { DepositSource } from "./detection.js";
 import { DepositWatcher } from "./detection.js";
 import { IdempotencyStore } from "./idempotency.js";
 import { TenantStore } from "./stores.js";
@@ -27,25 +20,24 @@ import {
 const COOLDOWN_MS = 30 * 60_000;
 
 /**
- * Everything the API needs to compose the engine. The chain-touching pieces
- * (broadcaster, balances, deriveAddress, depositSource, webhookPoster) and the
- * engine xpub are injected, so tests wire fakes and prod wires the real Tron
- * adapters — and the signer matching `engineXpub` lives inside `broadcaster`.
+ * Everything the API needs to compose the engine. All chain-touching operations
+ * go through the `ChainRouter` (ADR 0016), which dispatches broadcast, balance,
+ * deposit-detection, and address derivation to the addressed chain's plugin —
+ * tests wire a one-chain router of fakes, prod wires Tron + EVM. The engine xpub
+ * is shared across secp256k1 chains; the signer matching it lives in each plugin.
  */
 export interface EngineConfig {
   sql: SqlClient;
-  broadcaster: PayoutBroadcaster;
-  balances: AddressBalance;
+  chains: ChainRouter;
   policy: PolicyEngine;
-  depositSource: DepositSource;
   webhookPoster: WebhookPoster;
   engineXpub: string;
-  deriveAddress: (chain: string, xpub: string, index: number) => string;
   feeBasisPoints: number;
 }
 
 export interface Engine {
   sql: SqlClient;
+  chains: ChainRouter;
   tenants: TenantStore;
   ledger: LedgerService;
   pool: PoolManager;
@@ -61,11 +53,11 @@ export interface Engine {
 
 export function buildEngine(cfg: EngineConfig): Engine {
   const ledger = new LedgerService(new SqlLedgerStore(cfg.sql));
-  const pool = new PoolManager(new SqlPoolStore(cfg.sql), cfg.deriveAddress, {
+  const pool = new PoolManager(new SqlPoolStore(cfg.sql), cfg.chains.deriveAddress, {
     cooldownMs: COOLDOWN_MS,
   });
-  const gatherer = new PoolGatherer(pool, cfg.balances);
-  const payouts = new PayoutService(ledger, cfg.policy, cfg.broadcaster, gatherer);
+  const gatherer = new PoolGatherer(pool, cfg.chains.balances);
+  const payouts = new PayoutService(ledger, cfg.policy, cfg.chains.broadcaster, gatherer);
   const ingestor = new DepositIngestor(
     ledger,
     new PooledAttribution(pool, () => cfg.feeBasisPoints),
@@ -78,10 +70,11 @@ export function buildEngine(cfg: EngineConfig): Engine {
     webhookEndpoints,
     cfg.webhookPoster,
   );
-  const watcher = new DepositWatcher(pool, cfg.depositSource, ingestor, webhookOutbox);
+  const watcher = new DepositWatcher(pool, cfg.chains.depositSource, ingestor, webhookOutbox);
 
   return {
     sql: cfg.sql,
+    chains: cfg.chains,
     tenants: new TenantStore(cfg.sql),
     ledger,
     pool,

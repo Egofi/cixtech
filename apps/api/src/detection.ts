@@ -1,12 +1,9 @@
 import type { PoolManager } from "@cixtech/attribution";
-import type { ChainDeposit, DepositIngestor } from "@cixtech/chains";
+import type { DepositIngestor, DepositSource } from "@cixtech/chains";
 import type { WebhookOutbox } from "./webhooks.js";
 
-/** Fetches CONFIRMED inbound deposits for a watched address. Injected so tests use
- * fixtures and prod uses the Tron adapter (fetchInboundTrc20 + finality). */
-export interface DepositSource {
-  fetchInbound(chain: string, address: string): Promise<ChainDeposit[]>;
-}
+// DepositSource now lives with the chain ports (ADR 0016); re-exported for callers.
+export type { DepositSource } from "@cixtech/chains";
 
 /**
  * Detection loop (build spec §8). Polls the chain for deposits to every watched
@@ -25,6 +22,23 @@ export class DepositWatcher {
     private readonly ingestor: DepositIngestor,
     private readonly outbox: WebhookOutbox,
   ) {}
+
+  /**
+   * Poll every chain once, isolating failures: a chain whose RPC is down fails
+   * its own tick and is reported, but never stalls the others (ADR 0016).
+   */
+  async pollAll(chains: string[]): Promise<{ credited: number; failures: string[] }> {
+    let credited = 0;
+    const failures: string[] = [];
+    for (const chain of chains) {
+      try {
+        credited += (await this.pollOnce(chain)).credited;
+      } catch (err) {
+        failures.push(`${chain}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return { credited, failures };
+  }
 
   async pollOnce(chain: string): Promise<{ credited: number }> {
     const watched = await this.pool.activeAddresses(chain);

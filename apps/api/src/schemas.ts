@@ -46,7 +46,9 @@ export const depositAddressSchema: FastifySchema = {
     required: ["chain", "asset"],
     additionalProperties: false,
     properties: {
-      chain: { type: "string", enum: ["TRON"] },
+      // Any well-formed chain name; the ChainRouter is the source of truth for
+      // which are actually supported (400 UNSUPPORTED_CHAIN otherwise, ADR 0016).
+      chain: { type: "string", minLength: 1, maxLength: 32 },
       asset: { type: "string", minLength: 1, maxLength: 16 },
     },
   },
@@ -89,7 +91,9 @@ export const withdrawalSchema: FastifySchema = {
     required: ["chain", "asset", "amount", "destination"],
     additionalProperties: false,
     properties: {
-      chain: { type: "string", enum: ["TRON"] },
+      // Any well-formed chain name; the ChainRouter is the source of truth for
+      // which are actually supported (400 UNSUPPORTED_CHAIN otherwise, ADR 0016).
+      chain: { type: "string", minLength: 1, maxLength: 32 },
       asset: { type: "string", minLength: 1, maxLength: 16 },
       amount: { type: "string", pattern: "^[1-9][0-9]*$" }, // positive integer base units
       destination: { type: "string", minLength: 25, maxLength: 64 },

@@ -1,71 +1,42 @@
-import {
-  FetchHttpClient,
-  PolicyEngine,
-  SqlKillSwitch,
-  SqlVelocityLimiter,
-  TronAdapter,
-  TronBalanceProvider,
-  TronPayoutBroadcaster,
-  deriveTronAddress,
-  makeTronSigner,
-} from "@cixtech/chains";
+import { PolicyEngine, SqlKillSwitch, SqlVelocityLimiter } from "@cixtech/chains";
 import { PGlite } from "@electric-sql/pglite";
-import { HDKey } from "@scure/bip32";
 import { buildApp } from "./app.js";
+import { buildRouter } from "./chains/build-router.js";
 import { buildEngine } from "./engine.js";
 import { applySchemas, pgliteClient } from "./sql.js";
 import { FetchWebhookPoster } from "./webhooks.js";
 
-const TRON_SOLIDIFIED_CONFIRMATIONS = 19;
 const DETECTION_INTERVAL_MS = 15_000;
 const WEBHOOK_DISPATCH_INTERVAL_MS = 5_000;
-
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} is required`);
-  return v;
-}
+const DEFAULT_VELOCITY_WINDOW_MS = 24 * 60 * 60_000;
 
 /**
- * Production bootstrap: wire the real Tron adapters from env and listen. The DB is
- * PGlite here (a path makes it persistent); prod points SqlClient at managed
- * Postgres (ADR 0013). The engine signer is a keypair signer today; swapping in
- * the MPC ThresholdSigner is a one-line change (ADR 0007/0014).
+ * Production bootstrap (ADR 0016): assemble the ChainRouter from env — every chain
+ * with an RPC URL is wired (Tron + the EVM family) — then compose the engine and
+ * listen. The DB is PGlite here (a path makes it persistent); prod points
+ * SqlClient at managed Postgres (ADR 0013). The signer is a keypair signer today;
+ * swapping in the MPC ThresholdSigner is a one-line change (ADR 0007/0014).
  */
 async function main(): Promise<void> {
   const env = process.env;
-  const accountXprv = required("CIXTECH_ENGINE_XPRV");
-  const rpc = required("TRON_RPC_URL");
-  const usdt = env["TRON_USDT_ADDRESS"];
-  const tokenContracts: Record<string, string> = usdt ? { USDT: usdt } : {};
-  const apiKey = env["TRONGRID_API_KEY"];
-
   const db = new PGlite(env["CIXTECH_DB_PATH"]);
   await applySchemas(db);
-
   const sql = pgliteClient(db);
-  const http = new FetchHttpClient();
-  const signer = makeTronSigner(accountXprv);
-  const engineXpub = HDKey.fromExtendedKey(accountXprv).publicExtendedKey;
+
+  const { router, engineXpub, chains } = buildRouter(env, sql);
+  if (chains.length === 0)
+    throw new Error("No chains configured (set at least one <CHAIN>_RPC_URL)");
+
   const allowlist = new Set((env["CIXTECH_PAYOUT_ALLOWLIST"] ?? "").split(",").filter(Boolean));
   const maxPayout = env["CIXTECH_MAX_PAYOUT"] ?? "1000000000";
-  const velocityWindowMs = Number(env["CIXTECH_VELOCITY_WINDOW_MS"] ?? String(24 * 60 * 60_000));
+  const velocityWindowMs = Number(
+    env["CIXTECH_VELOCITY_WINDOW_MS"] ?? String(DEFAULT_VELOCITY_WINDOW_MS),
+  );
   const velocityMax = env["CIXTECH_VELOCITY_MAX"] ?? "10000000000";
-  const tron = new TronAdapter(http, {
-    baseUrl: rpc,
-    confirmations: TRON_SOLIDIFIED_CONFIRMATIONS,
-    ...(apiKey ? { apiKey } : {}),
-  });
 
   const engine = buildEngine({
     sql,
-    broadcaster: new TronPayoutBroadcaster(http, signer, {
-      baseUrl: rpc,
-      tokenContracts,
-      feeLimitSun: 100_000_000,
-      ...(apiKey ? { apiKey } : {}),
-    }),
-    balances: new TronBalanceProvider(http, rpc, tokenContracts, apiKey),
+    chains: router,
     // Durable guardrail state (survives restart, shared across nodes): kill-switch
     // and rolling velocity cap both back onto the shared SqlClient.
     policy: new PolicyEngine({
@@ -77,11 +48,8 @@ async function main(): Promise<void> {
         maxTotalBaseUnits: BigInt(velocityMax),
       }),
     }),
-    // Finality-gated: only credit deposits that have reached a solidified (irreversible) block.
-    depositSource: { fetchInbound: (_chain, address) => tron.confirmedInboundTrc20(address) },
     webhookPoster: new FetchWebhookPoster(),
     engineXpub,
-    deriveAddress: (_chain, xpub, index) => deriveTronAddress(xpub, index),
     feeBasisPoints: Number(env["CIXTECH_FEE_BPS"] ?? "50"),
   });
 
@@ -93,12 +61,13 @@ async function main(): Promise<void> {
   });
   const port = Number(env["PORT"] ?? "3000");
   await app.listen({ port, host: "0.0.0.0" });
+  app.log.info({ chains }, "cixtech engine listening");
 
-  // Detection loop: poll for confirmed deposits (enqueues webhooks to the outbox).
+  // Detection loop: poll every configured chain (failures isolated per chain).
   setInterval(() => {
-    void engine.watcher
-      .pollOnce("TRON")
-      .catch((err) => console.error("detection poll failed", err));
+    void engine.watcher.pollAll(chains).then((r) => {
+      for (const f of r.failures) console.error("detection poll failed", f);
+    });
   }, DETECTION_INTERVAL_MS);
 
   // Webhook dispatch loop: drain the outbox with retries + dead-lettering.

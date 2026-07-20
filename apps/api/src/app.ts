@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { UnsupportedChainError } from "@cixtech/chains";
 import { AppError, type ErrorSink, captureError } from "@cixtech/errors";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
 import fastifySwagger from "@fastify/swagger";
@@ -29,6 +30,7 @@ const STATUS: Record<string, number> = {
   POLICY_DENIED: 403,
   BAD_REQUEST: 400,
   VALIDATION: 400,
+  UNSUPPORTED_CHAIN: 400,
   LEDGER_INSUFFICIENT_FUNDS: 409,
   POOL_INSUFFICIENT_FUNDS: 409,
 };
@@ -150,6 +152,11 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     await reply.status(201).send({ id: account.id, externalRef: account.externalRef });
   });
 
+  app.get("/v1/chains", { schema: { hide: true } }, async (req) => {
+    tenantOf(req);
+    return { chains: engine.chains.chains() };
+  });
+
   app.post(
     "/v1/accounts/:id/deposit-addresses",
     { schema: depositAddressSchema },
@@ -157,7 +164,14 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
       const tenant = tenantOf(req);
       const { id } = req.params as { id: string };
       await engine.tenants.requireAccount(tenant.id, id);
-      const { chain } = req.body as { chain: string };
+      // Canonicalize the chain so stored addresses match the detection loop's keys.
+      const chain = (req.body as { chain: string }).chain.toUpperCase();
+      // Reject an unroutable chain BEFORE a pool index is consumed.
+      if (!engine.chains.has(chain)) {
+        throw new UnsupportedChainError(`Chain not supported: ${chain}`, {
+          context: { chain, supported: engine.chains.chains().join(",") },
+        });
+      }
       const address = await engine.pool.assign(
         tenant.id,
         id,
@@ -185,6 +199,12 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     const tenant = tenantOf(req);
     const { id } = req.params as { id: string };
     await engine.tenants.requireAccount(tenant.id, id);
+    const withdrawChain = (req.body as { chain: string }).chain.toUpperCase();
+    if (!engine.chains.has(withdrawChain)) {
+      throw new UnsupportedChainError(`Chain not supported: ${withdrawChain}`, {
+        context: { chain: withdrawChain, supported: engine.chains.chains().join(",") },
+      });
+    }
     const key = header(req, "idempotency-key") as string; // required by schema
 
     const replay = await engine.idempotency.begin(tenant.id, key);
@@ -194,8 +214,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     }
 
     try {
-      const { chain, asset, amount, destination } = req.body as {
-        chain: string;
+      const { asset, amount, destination } = req.body as {
         asset: string;
         amount: string;
         destination: string;
@@ -203,7 +222,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
       const result = await engine.payouts.payout({
         tenant: tenant.id,
         merchant: id,
-        chain,
+        chain: withdrawChain,
         asset,
         amountBaseUnits: BigInt(amount),
         destination,

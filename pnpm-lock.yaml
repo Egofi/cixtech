@@ -54,6 +54,9 @@ importers:
       '@cixtech/attribution':
         specifier: workspace:*
         version: link:../../packages/attribution
+      '@cixtech/chain-config':
+        specifier: workspace:*
+        version: link:../../packages/chain-config
       '@cixtech/chains':
         specifier: workspace:*
         version: link:../../packages/chains

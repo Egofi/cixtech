@@ -76,21 +76,30 @@ export class EvmAdapter implements ChainAdapter {
   }
 
   /**
-   * Inbound ERC20 deposits to `address` that are FINAL — buried under the chain's
-   * confirmation depth. `fromBlock` is the watcher's last-scanned block; only
-   * blocks up to `head - confirmations` are scanned, so a reorg-able transfer is
-   * never credited. One query covers every tracked token (filtered by the `to`
-   * topic, then mapped back to a symbol).
+   * Scan inbound ERC20 deposits to `address` over `[fromBlock, head - confirmations]`
+   * — only FINAL blocks, so a reorg-able transfer is never credited. Returns the
+   * highest block scanned (`scannedTo`) so a durable cursor can advance past it;
+   * when nothing is final yet, `scannedTo < fromBlock` and the cursor holds. One
+   * query covers every tracked token (filtered by the `to` topic, mapped back to
+   * a symbol).
    */
-  async confirmedInboundErc20(address: string, fromBlock: bigint): Promise<ChainDeposit[]> {
+  async scanInboundErc20(
+    address: string,
+    fromBlock: bigint,
+  ): Promise<{ deposits: ChainDeposit[]; scannedTo: bigint }> {
     const head = await this.rpc.blockNumber();
     const safe = head - BigInt(this.config.confirmations);
-    if (safe < fromBlock) return [];
+    if (safe < fromBlock) return { deposits: [], scannedTo: fromBlock - 1n };
     const logs = await this.rpc.getLogs({
       fromBlock: toQuantity(fromBlock),
       toBlock: toQuantity(safe),
       topics: [TRANSFER_EVENT_TOPIC, null, addressTopic(address)],
     });
-    return this.parseDeposits(logs);
+    return { deposits: this.parseDeposits(logs), scannedTo: safe };
+  }
+
+  /** The finalized inbound ERC20 deposits to `address` from `fromBlock` onward. */
+  async confirmedInboundErc20(address: string, fromBlock: bigint): Promise<ChainDeposit[]> {
+    return (await this.scanInboundErc20(address, fromBlock)).deposits;
   }
 }

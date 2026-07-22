@@ -3,7 +3,7 @@ import { UnsupportedChainError } from "@cixtech/chains";
 import { AppError, type ErrorSink, captureError } from "@cixtech/errors";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
 import fastifySwagger from "@fastify/swagger";
-import fastifySwaggerUi from "@fastify/swagger-ui";
+import scalarApiReference from "@scalar/fastify-api-reference";
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
@@ -15,10 +15,22 @@ import { AdminService } from "./admin/admin-service.js";
 import { SqlErrorSink } from "./admin/sql-error-sink.js";
 import type { Engine } from "./engine.js";
 import { installMetrics } from "./metrics.js";
+import { registerPortal } from "./portal/portal-routes.js";
+import { PortalService } from "./portal/portal-service.js";
 import {
+  allowlistSchema,
   balanceSchema,
+  chainsSchema,
   createAccountSchema,
   depositAddressSchema,
+  getWebhookSchema,
+  listAccountsSchema,
+  listAllowlistSchema,
+  listBalancesSchema,
+  listDepositAddressesSchema,
+  listDepositsSchema,
+  listPayoutsSchema,
+  listWebhookDeliveriesSchema,
   setWebhookSchema,
   withdrawalSchema,
 } from "./schemas.js";
@@ -28,10 +40,15 @@ const STATUS: Record<string, number> = {
   UNAUTHORIZED: 401,
   ACCOUNT_NOT_FOUND: 404,
   POLICY_DENIED: 403,
+  POLICY_APPROVAL_REQUIRED: 202,
+  POLICY_TIME_LOCKED: 202,
+  POLICY_COMPLIANCE_HOLD: 403,
+  AUTHORIZATION_INVALID: 403,
   BAD_REQUEST: 400,
   VALIDATION: 400,
   UNSUPPORTED_CHAIN: 400,
   LEDGER_INSUFFICIENT_FUNDS: 409,
+  LEDGER_UNKNOWN_ENTRY: 409,
   POOL_INSUFFICIENT_FUNDS: 409,
 };
 
@@ -45,13 +62,18 @@ const header = (req: FastifyRequest, name: string): string | undefined => {
   return typeof v === "string" ? v : undefined;
 };
 
-/** Auth is skipped for operational and admin-plane routes (admin has its own auth). */
+/**
+ * Auth is skipped for operational, docs, admin-plane, and portal-shell routes
+ * (admin has its own auth; the portal shell is static — its data calls hit /v1
+ * with the tenant API key).
+ */
 const isPublic = (url: string): boolean =>
   url === "/health" ||
   url === "/ready" ||
   url === "/metrics" ||
   url.startsWith("/docs") ||
-  url.startsWith("/admin");
+  url.startsWith("/admin") ||
+  url.startsWith("/portal");
 
 export interface AdminPlaneOptions {
   /** Super-admin bearer token. When unset, the admin plane is disabled. */
@@ -87,14 +109,61 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
 
   await app.register(fastifySwagger, {
     openapi: {
-      info: { title: "cixtech Custody API", version: "0.1.0" },
+      info: {
+        title: "cixtech Custody API",
+        version: "0.1.0",
+        description: [
+          "Multi-tenant crypto-custody engine (Wallet-as-a-Service).",
+          "",
+          "## Authentication",
+          "Every request carries your tenant API key in the `x-api-key` header",
+          "(a `cxk_…` string, issued once when your tenant is created — the engine",
+          "stores only its hash). Click **Auth** in the sidebar, paste the key, and",
+          "every *Test Request* below sends it automatically.",
+          "",
+          "## The flow",
+          "1. **Create a sub-account** for each of your merchants/users.",
+          "2. **Assign a deposit address** — pooled per account; deposits to it are",
+          "   detected on-chain, credited at finality minus the platform fee, and",
+          "   announced by signed webhook (`deposit.confirmed`).",
+          "3. **Allow-list a destination** — a freshly added address is unusable",
+          "   until its cool-down elapses (defeats add-and-drain).",
+          "4. **Request a payout** — policy-guarded (limits, allow-list, velocity,",
+          "   kill-switch, solvency), then signed, broadcast, and settled. The",
+          "   `idempotency-key` header makes retries safe: one on-chain transfer, ever.",
+          "",
+          "The tenant dashboard lives at [/portal](/portal).",
+        ].join("\n"),
+      },
+      tags: [
+        {
+          name: "accounts",
+          description: "Sub-accounts (your merchants/users), balances, deposit addresses",
+        },
+        {
+          name: "payouts",
+          description: "Money-out: allow-list management and policy-guarded withdrawals",
+        },
+        {
+          name: "webhooks",
+          description:
+            "Signed event delivery to your endpoint (at-least-once, HMAC `x-cixtech-signature`)",
+        },
+        { name: "chains", description: "Which chains this deployment routes" },
+        {
+          name: "activity",
+          description: "Tenant-scoped history: deposits, payouts, webhook deliveries",
+        },
+      ],
       components: {
         securitySchemes: { apiKey: { type: "apiKey", name: "x-api-key", in: "header" } },
       },
       security: [{ apiKey: [] }],
     },
   });
-  await app.register(fastifySwaggerUi, { routePrefix: "/docs" });
+  // Scalar reference UI (assets bundled in the plugin — no CDN): sidebar nav,
+  // auth panel for the API key, and a per-route "Test Request" client.
+  await app.register(scalarApiReference, { routePrefix: "/docs" });
   installMetrics(app);
 
   const tenantOf = (req: FastifyRequest): Tenant => {
@@ -152,9 +221,76 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     await reply.status(201).send({ id: account.id, externalRef: account.externalRef });
   });
 
-  app.get("/v1/chains", { schema: { hide: true } }, async (req) => {
+  app.get("/v1/chains", { schema: chainsSchema }, async (req) => {
     tenantOf(req);
     return { chains: engine.chains.chains() };
+  });
+
+  // ── Tenant-scoped activity reads (feeds the portal + interactive docs) ────────
+  const portal = new PortalService(engine.sql);
+  const limitOf = (req: FastifyRequest): number =>
+    Math.min(Number((req.query as { limit?: string }).limit ?? 50), 200);
+
+  app.get("/v1/accounts", { schema: listAccountsSchema }, async (req) => {
+    const tenant = tenantOf(req);
+    const accounts = await engine.tenants.listAccounts(tenant.id, limitOf(req));
+    return {
+      accounts: accounts.map((a) => ({
+        id: a.id,
+        externalRef: a.externalRef,
+        createdAt: a.createdAt,
+      })),
+    };
+  });
+
+  app.get(
+    "/v1/accounts/:id/deposit-addresses",
+    { schema: listDepositAddressesSchema },
+    async (req) => {
+      const tenant = tenantOf(req);
+      const { id } = req.params as { id: string };
+      await engine.tenants.requireAccount(tenant.id, id);
+      return { addresses: await portal.depositAddresses(tenant.id, id) };
+    },
+  );
+
+  app.get("/v1/balances", { schema: listBalancesSchema }, async (req) => {
+    const tenant = tenantOf(req);
+    return { balances: await portal.balances(tenant.id) };
+  });
+
+  app.get("/v1/deposits", { schema: listDepositsSchema }, async (req) => {
+    const tenant = tenantOf(req);
+    return { deposits: await portal.deposits(tenant.id, limitOf(req)) };
+  });
+
+  app.get("/v1/payouts", { schema: listPayoutsSchema }, async (req) => {
+    const tenant = tenantOf(req);
+    return { payouts: await portal.payouts(tenant.id, limitOf(req)) };
+  });
+
+  app.get("/v1/allowlist", { schema: listAllowlistSchema }, async (req) => {
+    const tenant = tenantOf(req);
+    const rows = await engine.allowlist.list(tenant.id, limitOf(req));
+    return {
+      allowlist: rows.map((r) => ({
+        accountId: r.merchant,
+        chain: r.chain,
+        address: r.address,
+        usableAt: r.usableAt.toISOString(),
+        addedAt: r.addedAt.toISOString(),
+      })),
+    };
+  });
+
+  app.get("/v1/webhook", { schema: getWebhookSchema }, async (req) => {
+    const tenant = tenantOf(req);
+    return portal.webhookEndpoint(tenant.id);
+  });
+
+  app.get("/v1/webhook/deliveries", { schema: listWebhookDeliveriesSchema }, async (req) => {
+    const tenant = tenantOf(req);
+    return { deliveries: await portal.webhookDeliveries(tenant.id, limitOf(req)) };
   });
 
   app.post(
@@ -193,6 +329,25 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
       Asset(asset),
     );
     await reply.send({ asset: asset.toUpperCase(), available: available.toString() });
+  });
+
+  app.post("/v1/accounts/:id/allowlist", { schema: allowlistSchema }, async (req, reply) => {
+    const tenant = tenantOf(req);
+    const { id } = req.params as { id: string };
+    await engine.tenants.requireAccount(tenant.id, id);
+    const { chain, address } = req.body as { chain: string; address: string };
+    // Cool-down applies (§7.2): the destination is unusable until usableAt, so a
+    // compromised console cannot add an address and drain to it in one session.
+    const { usableAt } = await engine.allowlist.add(
+      tenant.id,
+      id,
+      chain.toUpperCase(),
+      address,
+      engine.allowlistCooldownMs,
+    );
+    await reply
+      .status(201)
+      .send({ chain: chain.toUpperCase(), address, usableAt: usableAt.toISOString() });
   });
 
   app.post("/v1/accounts/:id/withdrawals", { schema: withdrawalSchema }, async (req, reply) => {
@@ -242,6 +397,10 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   // a clear "disabled" 401 rather than a 404.
   const adminService = new AdminService(engine.sql, engine, opts.admin?.limits ?? DEFAULT_LIMITS);
   registerAdmin(app, { service: adminService, token: opts.admin?.token });
+
+  // Tenant portal (dashboard) — static SPA shell; its data calls hit /v1 with the
+  // tenant API key, so the shell itself needs no server-side auth.
+  registerPortal(app);
 
   await app.ready();
   return app;

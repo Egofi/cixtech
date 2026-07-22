@@ -28,6 +28,14 @@ export interface ChainDeposit {
  */
 export interface DepositSource {
   fetchInbound(chain: string, address: string): Promise<ChainDeposit[]>;
+  /**
+   * Optional: previously-credited deposits to a watched address that have since
+   * been REORGED OUT past finality (build spec §9). A chain with real deep-reorg
+   * risk (Polygon depth, BSC pre-finality) implements this; the detection loop
+   * reverses each returned deposit in the ledger and emits `deposit.reorged`. A
+   * source that omits it asserts finality is terminal for its chain (e.g. XRP).
+   */
+  reorged?(chain: string, address: string): Promise<ChainDeposit[]>;
 }
 
 /**

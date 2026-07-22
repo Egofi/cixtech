@@ -1,11 +1,12 @@
 import { POOL_SCHEMA_SQL } from "@cixtech/attribution";
-import { POLICY_SCHEMA_SQL } from "@cixtech/chains";
+import { PAYOUT_JOURNAL_SCHEMA_SQL, POLICY_SCHEMA_SQL } from "@cixtech/chains";
 import { LEDGER_SCHEMA_SQL } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
 import type { PGlite } from "@electric-sql/pglite";
 import { ADMIN_SCHEMA_SQL } from "./admin/admin-schema.js";
 import { API_SCHEMA_SQL } from "./api-schema.js";
 import { CURSOR_SCHEMA_SQL } from "./chains/deposit-cursor.js";
+import { RLS_SCHEMA_SQL, assertTenantTablesProtected } from "./rls.js";
 
 /** Wraps a PGlite instance as the shared SqlClient. Prod swaps this for a pg/Prisma client. */
 export function pgliteClient(db: PGlite): SqlClient {
@@ -26,7 +27,10 @@ export async function applySchemas(db: PGlite): Promise<void> {
   await db.exec(LEDGER_SCHEMA_SQL);
   await db.exec(POOL_SCHEMA_SQL);
   await db.exec(POLICY_SCHEMA_SQL);
+  await db.exec(PAYOUT_JOURNAL_SCHEMA_SQL);
   await db.exec(API_SCHEMA_SQL);
   await db.exec(ADMIN_SCHEMA_SQL);
   await db.exec(CURSOR_SCHEMA_SQL);
+  await db.exec(RLS_SCHEMA_SQL);
+  await assertTenantTablesProtected(pgliteClient(db));
 }

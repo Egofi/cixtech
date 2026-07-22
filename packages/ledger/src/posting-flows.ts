@@ -265,6 +265,107 @@ export function depositDetected(input: DepositDetectedInput): JournalEntry {
   return entry;
 }
 
+export interface DepositQuarantinedInput {
+  id: JournalEntryId;
+  idempotencyKey: IdempotencyKey;
+  asset: Asset;
+  amount: bigint; // gross base units received
+  poolAddr: LedgerAccountKey;
+  complianceSuspense: LedgerAccountKey;
+  occurredAt?: Date;
+}
+
+/**
+ * Credit a KYT/sanctions-flagged deposit into `compliance_suspense` instead of the
+ * merchant (build spec §14). The value physically lands in the pool address
+ * (ASSET, debit) but the offsetting liability is held in `compliance_suspense`
+ * (credit), NOT `merchant_available` — so flagged funds are provably held, never
+ * spendable by the merchant, until a compliance decision releases or returns them.
+ * No fee is recognized on quarantined value.
+ */
+export function depositQuarantined(input: DepositQuarantinedInput): JournalEntry {
+  if (input.amount <= 0n) {
+    throw new InvalidPostingError(`Deposit amount must be positive, got ${input.amount}`);
+  }
+  const entry: JournalEntry = {
+    id: input.id,
+    idempotencyKey: input.idempotencyKey,
+    kind: "deposit.quarantined",
+    postings: [
+      { account: input.poolAddr, asset: input.asset, amount: input.amount, direction: "DEBIT" },
+      {
+        account: input.complianceSuspense,
+        asset: input.asset,
+        amount: input.amount,
+        direction: "CREDIT",
+      },
+    ],
+    occurredAt: input.occurredAt ?? new Date(),
+  };
+  assertBalanced(entry);
+  return entry;
+}
+
+export interface DepositReleasedInput {
+  id: JournalEntryId;
+  idempotencyKey: IdempotencyKey;
+  asset: Asset;
+  amount: bigint; // net to release to the merchant (gross − fee)
+  fee: bigint; // fee recognized on release, may be 0
+  complianceSuspense: LedgerAccountKey;
+  merchantAvailable: LedgerAccountKey;
+  feeRevenue: LedgerAccountKey;
+  occurredAt?: Date;
+}
+
+/**
+ * Release previously quarantined funds after a compliance clear (build spec §14):
+ * move the held liability out of `compliance_suspense` (DEBIT) into
+ * `merchant_available` (CREDIT) plus the recognized fee (CREDIT). Total liability
+ * is unchanged; the funds simply become the merchant's and spendable. `net + fee`
+ * must equal the released `amount + fee` that was held.
+ */
+export function depositReleased(input: DepositReleasedInput): JournalEntry {
+  if (input.amount <= 0n) {
+    throw new InvalidPostingError(`Release amount must be positive, got ${input.amount}`);
+  }
+  if (input.fee < 0n) {
+    throw new InvalidPostingError(`Release fee must be non-negative, got ${input.fee}`);
+  }
+  const gross = input.amount + input.fee;
+  const postings: Posting[] = [
+    {
+      account: input.complianceSuspense,
+      asset: input.asset,
+      amount: gross,
+      direction: "DEBIT",
+    },
+    {
+      account: input.merchantAvailable,
+      asset: input.asset,
+      amount: input.amount,
+      direction: "CREDIT",
+    },
+  ];
+  if (input.fee > 0n) {
+    postings.push({
+      account: input.feeRevenue,
+      asset: input.asset,
+      amount: input.fee,
+      direction: "CREDIT",
+    });
+  }
+  const entry: JournalEntry = {
+    id: input.id,
+    idempotencyKey: input.idempotencyKey,
+    kind: "deposit.released",
+    postings,
+    occurredAt: input.occurredAt ?? new Date(),
+  };
+  assertBalanced(entry);
+  return entry;
+}
+
 /** Reverse a prior entry (reorg / compensation). Flips every posting's direction. */
 export function reverse(
   entry: JournalEntry,

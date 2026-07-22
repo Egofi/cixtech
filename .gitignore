@@ -7,7 +7,12 @@ coverage/
 # Secrets / env — never commit
 .env
 .env.*
+!.env.dev.example
 *.pem
+
+# Dev runner scratch output + local dev database
+.dev-server.mjs
+.cixtech-dev-db/
 
 # MPC / key material must never touch the repo (ADR 0007)
 *.share

@@ -7,7 +7,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "dev": "node --experimental-strip-types src/server.ts"
+    "dev": "node dev-run.mjs"
   },
   "dependencies": {
     "@cixtech/attribution": "workspace:*",
@@ -19,7 +19,7 @@
     "@cixtech/types": "workspace:*",
     "@electric-sql/pglite": "^0.5.4",
     "@fastify/swagger": "^9",
-    "@fastify/swagger-ui": "^5",
+    "@scalar/fastify-api-reference": "^1.62.9",
     "fastify": "^5.2.0",
     "prom-client": "^15"
   }

@@ -1,4 +1,4 @@
-import type { Asset, LedgerAccountKey } from "@cixtech/types";
+import type { Asset, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
 import type { JournalEntry, Posting } from "./entry.js";
 import type { TotalsByType } from "./solvency.js";
 
@@ -19,6 +19,12 @@ export interface LedgerStore {
 
   /** All postings for an account+asset — the source of truth balances reconcile against. */
   postingsFor(account: LedgerAccountKey, asset: Asset): Promise<readonly Posting[]>;
+
+  /**
+   * The postings of one journal entry by its id — the input to a compensating
+   * reversal (reorg / compliance release). Empty if the id is unknown.
+   */
+  entryPostings(entryId: JournalEntryId): Promise<readonly Posting[]>;
 
   /** Per-type, per-asset magnitudes for the solvency invariant. */
   totalsByType(): Promise<TotalsByType>;

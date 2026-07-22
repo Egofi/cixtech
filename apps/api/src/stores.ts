@@ -50,6 +50,47 @@ export class TenantStore {
     return { id: row.id, name: row.name };
   }
 
+  /**
+   * Issue an ADDITIONAL API key for an existing tenant (lost-key recovery via the
+   * admin plane). The plaintext is returned once and only its hash is stored;
+   * previously issued keys stay valid — revocation is a separate, future concern.
+   */
+  async issueKey(tenantId: string): Promise<string> {
+    const r = await this.sql.query<{ id: string }>("SELECT id FROM tenant WHERE id = $1", [
+      tenantId,
+    ]);
+    if (!r.rows[0]) throw new AccountNotFoundError(`Tenant ${tenantId} not found`);
+    const apiKey = `cxk_${randomBytes(24).toString("hex")}`;
+    await this.sql.query("INSERT INTO api_key (key_hash, tenant_id) VALUES ($1, $2)", [
+      hashKey(apiKey),
+      tenantId,
+    ]);
+    return apiKey;
+  }
+
+  /** All of a tenant's sub-accounts, newest first. */
+  async listAccounts(
+    tenantId: string,
+    limit = 50,
+  ): Promise<Array<Account & { createdAt: string }>> {
+    const r = await this.sql.query<{
+      id: string;
+      tenant_id: string;
+      external_ref: string | null;
+      created_at: string;
+    }>(
+      `SELECT id, tenant_id, external_ref, created_at FROM account
+        WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [tenantId, limit],
+    );
+    return r.rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      externalRef: row.external_ref,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+  }
+
   async createAccount(tenantId: string, externalRef: string | null): Promise<Account> {
     const id = randomUUID();
     await this.sql.query("INSERT INTO account (id, tenant_id, external_ref) VALUES ($1, $2, $3)", [

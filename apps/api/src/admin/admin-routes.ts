@@ -161,4 +161,14 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
     )) as Awaited<ReturnType<AdminService["createTenant"]>>;
     return reply.status(201).send(created);
   });
+  // Lost-key recovery: issue an ADDITIONAL key for a tenant. The plaintext is
+  // returned once and only its hash is stored; the audit records the tenant id,
+  // never the key.
+  app.post("/admin/api/tenants/:id/keys", hidden, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const apiKey = (await mutate(req, "tenant.issue_key", id, undefined, () =>
+      service.issueKey(id),
+    )) as string;
+    return reply.status(201).send({ tenantId: id, apiKey });
+  });
 }

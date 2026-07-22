@@ -40,26 +40,56 @@ export class DepositWatcher {
     return { credited, failures };
   }
 
-  async pollOnce(chain: string): Promise<{ credited: number }> {
+  async pollOnce(chain: string): Promise<{ credited: number; reversed: number }> {
     const watched = await this.pool.activeAddresses(chain);
     let credited = 0;
+    let reversed = 0;
 
     for (const addr of watched) {
       const deposits = await this.source.fetchInbound(chain, addr.address);
       for (const deposit of deposits) {
         const res = await this.ingestor.ingestConfirmed(deposit);
-        if (res.status !== "credited") continue;
-        credited++;
-        await this.outbox.enqueue(addr.tenant, "deposit.confirmed", {
-          account: addr.merchant,
-          chain,
-          address: addr.address,
-          txId: deposit.txId,
-          asset: deposit.asset,
-          amount: deposit.amountBaseUnits.toString(),
-        });
+        if (res.status === "credited") {
+          credited++;
+          await this.outbox.enqueue(addr.tenant, "deposit.confirmed", {
+            account: addr.merchant,
+            chain,
+            address: addr.address,
+            txId: deposit.txId,
+            asset: deposit.asset,
+            amount: deposit.amountBaseUnits.toString(),
+          });
+        } else if (res.status === "quarantined") {
+          // Held for compliance (§14): notify, but never as a spendable credit.
+          await this.outbox.enqueue(addr.tenant, "compliance.hold", {
+            account: addr.merchant,
+            chain,
+            address: addr.address,
+            txId: deposit.txId,
+            asset: deposit.asset,
+            amount: deposit.amountBaseUnits.toString(),
+          });
+        }
+      }
+
+      // Deep-reorg reversal (§9): a source that can detect a post-finality reorg
+      // returns the vanished deposits; we compensate the ledger and notify.
+      if (this.source.reorged) {
+        for (const gone of await this.source.reorged(chain, addr.address)) {
+          const rev = await this.ingestor.reverseCredit(gone);
+          if (rev.status !== "reversed") continue;
+          reversed++;
+          await this.outbox.enqueue(addr.tenant, "deposit.reorged", {
+            account: addr.merchant,
+            chain,
+            address: addr.address,
+            txId: gone.txId,
+            asset: gone.asset,
+            amount: gone.amountBaseUnits.toString(),
+          });
+        }
       }
     }
-    return { credited };
+    return { credited, reversed };
   }
 }

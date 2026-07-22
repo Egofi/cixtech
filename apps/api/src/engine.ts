@@ -1,9 +1,14 @@
 import { PoolGatherer, PoolManager, PooledAttribution, SqlPoolStore } from "@cixtech/attribution";
 import {
+  AuthorizationSigner,
+  AuthorizingBroadcaster,
   type ChainRouter,
   DepositIngestor,
+  type DepositScreener,
+  PayoutJournal,
   PayoutService,
   type PolicyEngine,
+  SqlAllowlist,
 } from "@cixtech/chains";
 import { LedgerService, SqlLedgerStore } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
@@ -33,7 +38,20 @@ export interface EngineConfig {
   webhookPoster: WebhookPoster;
   engineXpub: string;
   feeBasisPoints: number;
+  /**
+   * HSM-held policy key (§7). When set, every payout mints an authorization token
+   * and the broadcaster re-verifies its sighash binding before signing — so a
+   * substituted transaction is refused at the last mile. Absent = no token (dev).
+   */
+  policyKey?: string;
+  policyVersion?: string;
+  /** Optional KYT/sanctions screen for inbound deposits (§14). */
+  depositScreener?: DepositScreener;
+  /** Cool-down applied to a tenant-added allow-list destination (§7.2). Default 24h. */
+  allowlistCooldownMs?: number;
 }
+
+const DEFAULT_ALLOWLIST_COOLDOWN_MS = 24 * 60 * 60_000;
 
 export interface Engine {
   sql: SqlClient;
@@ -48,6 +66,8 @@ export interface Engine {
   webhookOutbox: WebhookOutbox;
   webhookDispatcher: WebhookDispatcher;
   watcher: DepositWatcher;
+  allowlist: SqlAllowlist;
+  allowlistCooldownMs: number;
   engineXpub: string;
 }
 
@@ -57,11 +77,26 @@ export function buildEngine(cfg: EngineConfig): Engine {
     cooldownMs: COOLDOWN_MS,
   });
   const gatherer = new PoolGatherer(pool, cfg.chains.balances);
-  const payouts = new PayoutService(ledger, cfg.policy, cfg.chains.broadcaster, gatherer);
+
+  // Authorization (§7): when a policy key is set, mint a token per payout and gate
+  // the broadcaster on its sighash binding — the last-mile independent re-verify.
+  const authorizer = cfg.policyKey
+    ? new AuthorizationSigner(cfg.policyKey, cfg.policyVersion ?? "v1")
+    : undefined;
+  const broadcaster = authorizer
+    ? new AuthorizingBroadcaster(cfg.chains.broadcaster, authorizer)
+    : cfg.chains.broadcaster;
+
+  const payouts = new PayoutService(ledger, cfg.policy, broadcaster, gatherer, {
+    // Durable intent journal: crash-recoverable, and a retry never double-broadcasts.
+    journal: new PayoutJournal(cfg.sql),
+    ...(authorizer ? { authorizer } : {}),
+  });
   const ingestor = new DepositIngestor(
     ledger,
     new PooledAttribution(pool, () => cfg.feeBasisPoints),
     pool,
+    cfg.depositScreener,
   );
   const webhookEndpoints = new WebhookEndpointStore(cfg.sql);
   const webhookOutbox = new WebhookOutbox(cfg.sql);
@@ -85,6 +120,8 @@ export function buildEngine(cfg: EngineConfig): Engine {
     webhookOutbox,
     webhookDispatcher,
     watcher,
+    allowlist: new SqlAllowlist(cfg.sql),
+    allowlistCooldownMs: cfg.allowlistCooldownMs ?? DEFAULT_ALLOWLIST_COOLDOWN_MS,
     engineXpub: cfg.engineXpub,
   };
 }

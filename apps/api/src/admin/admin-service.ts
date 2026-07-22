@@ -289,6 +289,11 @@ export class AdminService {
     return this.engine.tenants.createTenant(name);
   }
 
+  /** Issue an additional API key for a tenant (lost-key recovery); returned ONCE. */
+  issueKey(tenantId: string): Promise<string> {
+    return this.engine.tenants.issueKey(tenantId);
+  }
+
   /** Append an immutable control-plane audit row (ADR 0015). */
   async recordAudit(entry: AuditEntry): Promise<void> {
     await this.sql.query(

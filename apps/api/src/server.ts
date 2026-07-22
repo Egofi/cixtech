@@ -1,4 +1,5 @@
-import { PolicyEngine, SqlKillSwitch, SqlVelocityLimiter } from "@cixtech/chains";
+import { PolicyEngine, SqlAllowlist, SqlKillSwitch, SqlVelocityLimiter } from "@cixtech/chains";
+import { LedgerService, SqlLedgerStore } from "@cixtech/ledger";
 import { PGlite } from "@electric-sql/pglite";
 import { buildApp } from "./app.js";
 import { buildRouter } from "./chains/build-router.js";
@@ -34,15 +35,41 @@ async function main(): Promise<void> {
   );
   const velocityMax = env["CIXTECH_VELOCITY_MAX"] ?? "10000000000";
 
+  // Fail-closed solvency gate (§7.7): a payout is refused unless the ledger can
+  // prove Σ ASSET ≥ Σ LIABILITY for the asset. Backs onto the same store.
+  const ledgerForOracle = new LedgerService(new SqlLedgerStore(sql));
+  const approvalThreshold = env["CIXTECH_APPROVAL_THRESHOLD"];
+  const approvalRequired = env["CIXTECH_APPROVAL_REQUIRED"];
+  const timeLockThreshold = env["CIXTECH_TIMELOCK_THRESHOLD"];
+  const timeLockDelayMs = env["CIXTECH_TIMELOCK_DELAY_MS"];
+
   const engine = buildEngine({
     sql,
     chains: router,
-    // Durable guardrail state (survives restart, shared across nodes): kill-switch
-    // and rolling velocity cap both back onto the shared SqlClient.
+    // Durable guardrail state (survives restart, shared across nodes): kill-switch,
+    // cool-down-aware allow-list, solvency gate, dual-approval, time-lock, velocity.
     policy: new PolicyEngine({
       maxPerPayoutBaseUnits: BigInt(maxPayout),
       allowlist,
+      allowlistStore: new SqlAllowlist(sql),
       killSwitch: new SqlKillSwitch(sql),
+      solvency: { solvent: (asset) => ledgerForOracle.isSolvent(asset) },
+      ...(approvalThreshold && approvalRequired
+        ? {
+            approval: {
+              thresholdBaseUnits: BigInt(approvalThreshold),
+              required: Number(approvalRequired),
+            },
+          }
+        : {}),
+      ...(timeLockThreshold && timeLockDelayMs
+        ? {
+            timeLock: {
+              thresholdBaseUnits: BigInt(timeLockThreshold),
+              delayMs: Number(timeLockDelayMs),
+            },
+          }
+        : {}),
       velocity: new SqlVelocityLimiter(sql, {
         windowMs: velocityWindowMs,
         maxTotalBaseUnits: BigInt(velocityMax),
@@ -51,6 +78,8 @@ async function main(): Promise<void> {
     webhookPoster: new FetchWebhookPoster(),
     engineXpub,
     feeBasisPoints: Number(env["CIXTECH_FEE_BPS"] ?? "50"),
+    // HSM-held policy key: mints + verifies the per-payout authorization token (§7).
+    ...(env["CIXTECH_POLICY_KEY"] ? { policyKey: env["CIXTECH_POLICY_KEY"] } : {}),
   });
 
   const app = await buildApp(engine, {

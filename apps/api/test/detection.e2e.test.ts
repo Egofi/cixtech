@@ -65,7 +65,7 @@ describe("detection + webhook outbox", () => {
     deposit = depositTo(address);
 
     // Detect: credits the ledger and ENQUEUES (no delivery yet).
-    expect(await ctx.engine.watcher.pollOnce("TRON")).toEqual({ credited: 1 });
+    expect(await ctx.engine.watcher.pollOnce("TRON")).toEqual({ credited: 1, reversed: 0 });
     expect(webhook.posts).toHaveLength(0);
     expect(
       await ctx.engine.ledger.availableBalance(
@@ -86,7 +86,7 @@ describe("detection + webhook outbox", () => {
     ).toBe(true);
 
     // Re-poll: no double-credit, no new enqueue; re-dispatch: nothing due.
-    expect(await ctx.engine.watcher.pollOnce("TRON")).toEqual({ credited: 0 });
+    expect(await ctx.engine.watcher.pollOnce("TRON")).toEqual({ credited: 0, reversed: 0 });
     expect(await ctx.engine.webhookDispatcher.dispatchDue()).toEqual({ delivered: 0, failed: 0 });
     expect(webhook.posts).toHaveLength(1);
   });

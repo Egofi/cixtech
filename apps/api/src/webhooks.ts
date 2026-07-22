@@ -91,24 +91,41 @@ export class WebhookOutbox {
     return id;
   }
 
-  async claimDue(now: Date, limit: number): Promise<DueDelivery[]> {
-    const r = await this.sql.query<{
-      id: string;
-      tenant_id: string;
-      body: string;
-      attempts: number;
-    }>(
-      `SELECT id, tenant_id, body, attempts FROM webhook_delivery
-       WHERE status = 'pending' AND next_attempt <= $1
-       ORDER BY next_attempt LIMIT $2`,
-      [now.toISOString(), limit],
-    );
-    return r.rows.map((row) => ({
-      id: row.id,
-      tenantId: row.tenant_id,
-      body: row.body,
-      attempts: Number(row.attempts),
-    }));
+  /**
+   * Atomically CLAIM due deliveries so two dispatchers (or overlapping ticks) never
+   * both send the same row. `FOR UPDATE SKIP LOCKED` selects only unlocked due rows,
+   * and the same transaction leases them by pushing `next_attempt` forward — so a
+   * concurrent claimer skips them and, if this worker dies mid-delivery, the lease
+   * expires and the row is retried (at-least-once; receivers dedupe on the body id).
+   */
+  async claimDue(now: Date, limit: number, leaseMs = 60_000): Promise<DueDelivery[]> {
+    return this.sql.transaction(async (tx) => {
+      const r = await tx.query<{
+        id: string;
+        tenant_id: string;
+        body: string;
+        attempts: number;
+      }>(
+        `SELECT id, tenant_id, body, attempts FROM webhook_delivery
+         WHERE status = 'pending' AND next_attempt <= $1
+         ORDER BY next_attempt LIMIT $2
+         FOR UPDATE SKIP LOCKED`,
+        [now.toISOString(), limit],
+      );
+      if (r.rows.length > 0) {
+        const lease = new Date(now.getTime() + leaseMs).toISOString();
+        await tx.query("UPDATE webhook_delivery SET next_attempt = $2 WHERE id = ANY($1::text[])", [
+          r.rows.map((row) => row.id),
+          lease,
+        ]);
+      }
+      return r.rows.map((row) => ({
+        id: row.id,
+        tenantId: row.tenant_id,
+        body: row.body,
+        attempts: Number(row.attempts),
+      }));
+    });
   }
 
   async markDelivered(id: string): Promise<void> {

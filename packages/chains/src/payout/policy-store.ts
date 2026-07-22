@@ -1,5 +1,6 @@
 import type { SqlClient } from "@cixtech/ledger";
 import {
+  type Allowlist,
   type KillSwitch,
   type PayoutContext,
   PolicyDeniedError,
@@ -30,6 +31,19 @@ CREATE TABLE IF NOT EXISTS policy_payout_log (
 );
 CREATE INDEX IF NOT EXISTS policy_payout_log_window
   ON policy_payout_log(tenant, merchant, asset, at);
+
+-- Per-(tenant, merchant, chain) destination allow-list WITH a cool-down (§7.2).
+-- A freshly added address is unusable until usable_at, defeating the attacker who
+-- adds their own address and drains in the same session.
+CREATE TABLE IF NOT EXISTS payout_allowlist (
+  tenant    text NOT NULL,
+  merchant  text NOT NULL,
+  chain     text NOT NULL,
+  address   text NOT NULL,
+  usable_at timestamptz NOT NULL,
+  added_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant, merchant, chain, address)
+);
 `;
 
 const GLOBAL = "global";
@@ -132,5 +146,71 @@ export class SqlVelocityLimiter implements VelocityLimiter {
         [ctx.tenant, ctx.merchant, ctx.asset, cutoff],
       );
     });
+  }
+}
+
+/**
+ * Durable, cool-down-aware destination allow-list (§7.2). `add` records a
+ * destination with `usable_at = now + cooldownMs`; `usable` admits a payout only
+ * when the (tenant, merchant, chain, destination) row exists AND its cool-down has
+ * elapsed. Adding an address is therefore not enough to spend to it in the same
+ * session — the cool-down is the detection window for a compromised console.
+ */
+export class SqlAllowlist implements Allowlist {
+  constructor(private readonly sql: SqlClient) {}
+
+  async add(
+    tenant: string,
+    merchant: string,
+    chain: string,
+    address: string,
+    cooldownMs: number,
+    now: Date = new Date(),
+  ): Promise<{ usableAt: Date }> {
+    const usableAt = new Date(now.getTime() + Math.max(0, cooldownMs));
+    await this.sql.query(
+      `INSERT INTO payout_allowlist (tenant, merchant, chain, address, usable_at, added_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (tenant, merchant, chain, address) DO NOTHING`,
+      [tenant, merchant, chain, address, usableAt.toISOString(), now.toISOString()],
+    );
+    return { usableAt };
+  }
+
+  async usable(ctx: PayoutContext, now: Date): Promise<boolean> {
+    const { rows } = await this.sql.query<{ usable_at: string }>(
+      `SELECT usable_at FROM payout_allowlist
+        WHERE tenant = $1 AND merchant = $2 AND chain = $3 AND address = $4`,
+      [ctx.tenant, ctx.merchant, ctx.chain, ctx.destination],
+    );
+    const usableAt = rows[0]?.usable_at;
+    return usableAt !== undefined && new Date(usableAt) <= now;
+  }
+
+  /** A tenant's allow-listed destinations (newest first), with their cool-down state. */
+  async list(
+    tenant: string,
+    limit = 50,
+  ): Promise<
+    Array<{ merchant: string; chain: string; address: string; usableAt: Date; addedAt: Date }>
+  > {
+    const { rows } = await this.sql.query<{
+      merchant: string;
+      chain: string;
+      address: string;
+      usable_at: string;
+      added_at: string;
+    }>(
+      `SELECT merchant, chain, address, usable_at, added_at FROM payout_allowlist
+        WHERE tenant = $1 ORDER BY added_at DESC LIMIT $2`,
+      [tenant, limit],
+    );
+    return rows.map((r) => ({
+      merchant: r.merchant,
+      chain: r.chain,
+      address: r.address,
+      usableAt: new Date(r.usable_at),
+      addedAt: new Date(r.added_at),
+    }));
   }
 }

@@ -7,8 +7,8 @@ import {
 } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
 import { InsufficientFundsError } from "@cixtech/ledger";
+import { freshDatabase } from "@cixtech/testing";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
-import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import type {
   BroadcastResult,
@@ -26,19 +26,6 @@ const POOL = LedgerAccountKey("pool_addr:TRON:m1");
 const DEST = "TDestination0000000000000000000000";
 const FROM = "TPool00000000000000000000000000000";
 
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
-
 /** Fake broadcaster: records the request and returns a txId — no network, no funded key. */
 class FakeBroadcaster implements PayoutBroadcaster {
   sent: PayoutRequest[] = [];
@@ -54,9 +41,9 @@ const policy = new PolicyEngine({
 });
 
 async function makeService(grossDeposit: bigint) {
-  const db = new PGlite();
+  const db = await freshDatabase();
   await db.exec(LEDGER_SCHEMA_SQL);
-  const sql = wrap(db);
+  const sql = db.sql;
   const ledger = new LedgerService(new SqlLedgerStore(sql));
   await ledger.post(
     depositFinalized({

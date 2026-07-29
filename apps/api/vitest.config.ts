@@ -2,9 +2,12 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    // Each test spins up PGlite (WASM Postgres) + a Fastify app; running the
-    // files in parallel oversubscribes resources and trips timeouts. Run them
-    // sequentially with a generous per-test timeout.
+    // One real PostgreSQL server for the run; each test gets its own schema and
+    // its handle is released afterwards (setup.ts).
+    globalSetup: ["../../packages/testing/src/global-setup.ts"],
+    setupFiles: ["../../packages/testing/src/setup.ts"],
+    // Each test builds a Fastify app on its own schema; running files in parallel
+    // oversubscribes connections. Sequential, with a generous per-test timeout.
     fileParallelism: false,
     testTimeout: 30_000,
   },

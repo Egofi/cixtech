@@ -1,28 +1,44 @@
-import { PolicyEngine, SqlAllowlist, SqlKillSwitch, SqlVelocityLimiter } from "@cixtech/chains";
+import { EoaFundTransferStrategy, GatherStrategyRegistry } from "@cixtech/attribution";
+import { ChainRegistry } from "@cixtech/chain-config";
+import {
+  BroadcasterGasFunder,
+  GasStation,
+  type GasStationConfig,
+  PolicyEngine,
+  SqlAllowlist,
+  SqlKillSwitch,
+  SqlVelocityLimiter,
+} from "@cixtech/chains";
 import { LedgerService, SqlLedgerStore } from "@cixtech/ledger";
-import { PGlite } from "@electric-sql/pglite";
 import { buildApp } from "./app.js";
 import { buildRouter } from "./chains/build-router.js";
+import { openDatabase } from "./db.js";
 import { buildEngine } from "./engine.js";
-import { applySchemas, pgliteClient } from "./sql.js";
+import { assertSchemaReady } from "./sql.js";
 import { FetchWebhookPoster } from "./webhooks.js";
 
 const DETECTION_INTERVAL_MS = 15_000;
 const WEBHOOK_DISPATCH_INTERVAL_MS = 5_000;
+const POOL_RELEASE_INTERVAL_MS = 60_000;
 const DEFAULT_VELOCITY_WINDOW_MS = 24 * 60 * 60_000;
+/** Keep a pool address funded for several payouts rather than topping up each time. */
+const GAS_TOP_UP_MULTIPLE = 3n;
 
 /**
  * Production bootstrap (ADR 0016): assemble the ChainRouter from env — every chain
  * with an RPC URL is wired (Tron + the EVM family) — then compose the engine and
- * listen. The DB is PGlite here (a path makes it persistent); prod points
- * SqlClient at managed Postgres (ADR 0013). The signer is a keypair signer today;
- * swapping in the MPC ThresholdSigner is a one-line change (ADR 0007/0014).
+ * listen. The signer is a keypair signer today; swapping in the MPC
+ * ThresholdSigner is a one-line change (ADR 0007/0014).
+ *
+ * Database (ADR 0013): Postgres only — `DATABASE_URL` is required and the schema
+ * must ALREADY be migrated. The server verifies and refuses to boot rather than
+ * running DDL against a custody database as a start-up side effect.
  */
 async function main(): Promise<void> {
   const env = process.env;
-  const db = new PGlite(env["CIXTECH_DB_PATH"]);
-  await applySchemas(db);
-  const sql = pgliteClient(db);
+  const db = openDatabase(env);
+  const sql = db.sql;
+  await assertSchemaReady(sql);
 
   const { router, engineXpub, chains } = buildRouter(env, sql);
   if (chains.length === 0)
@@ -43,9 +59,52 @@ async function main(): Promise<void> {
   const timeLockThreshold = env["CIXTECH_TIMELOCK_THRESHOLD"];
   const timeLockDelayMs = env["CIXTECH_TIMELOCK_DELAY_MS"];
 
+  // Gather (ADR 0011): fund-then-transfer on plain HD EOAs is the shipped
+  // strategy. `prepare` provisions native gas into the pool address before an
+  // ERC-20/TRC-20 transfer — without it those payouts fail for insufficient gas,
+  // because a pool address only ever receives the token.
+  const registry = new ChainRegistry();
+  const gasRules = new Map<string, bigint>();
+  const gasConfigs = new Map<string, GasStationConfig>();
+  const nativeAsset = new Map<string, string>();
+  for (const chain of chains) {
+    const { gas } = registry.chain(chain);
+    gasRules.set(chain, gas.perTransferBaseUnits);
+    nativeAsset.set(chain, gas.nativeAsset);
+    // Floor: refuse to provision (and trip the breaker) once the float can no
+    // longer cover a meaningful number of transfers (§6.2).
+    gasConfigs.set(chain, {
+      nativeAsset: gas.nativeAsset,
+      floorBaseUnits: gas.perTransferBaseUnits * 10n,
+    });
+  }
+  const treasuryIndex = env["CIXTECH_GAS_TREASURY_INDEX"];
+  const treasuryAddress = env["CIXTECH_GAS_TREASURY_ADDRESS"];
+  const gasStation = new GasStation(
+    new LedgerService(new SqlLedgerStore(sql)),
+    gasConfigs,
+    treasuryAddress && treasuryIndex
+      ? new BroadcasterGasFunder(router.broadcaster, router.balances, {
+          nativeAssetOf: (c) => nativeAsset.get(c) ?? "",
+          treasuryOf: () => ({
+            address: treasuryAddress,
+            derivationIndex: Number(treasuryIndex),
+          }),
+          topUpMultiple: GAS_TOP_UP_MULTIPLE,
+        })
+      : undefined,
+  );
+  const gatherStrategies = new GatherStrategyRegistry([
+    new EoaFundTransferStrategy(router.deriveAddress, gasStation, {
+      gasRequirementBaseUnits: gasRules,
+      nativeAssetOf: (c) => nativeAsset.get(c),
+    }),
+  ]);
+
   const engine = buildEngine({
     sql,
     chains: router,
+    gatherStrategies,
     // Durable guardrail state (survives restart, shared across nodes): kill-switch,
     // cool-down-aware allow-list, solvency gate, dual-approval, time-lock, velocity.
     policy: new PolicyEngine({
@@ -75,6 +134,7 @@ async function main(): Promise<void> {
         maxTotalBaseUnits: BigInt(velocityMax),
       }),
     }),
+    ...(approvalRequired ? { approvalsRequired: Number(approvalRequired) } : {}),
     webhookPoster: new FetchWebhookPoster(),
     engineXpub,
     feeBasisPoints: Number(env["CIXTECH_FEE_BPS"] ?? "50"),
@@ -90,7 +150,7 @@ async function main(): Promise<void> {
   });
   const port = Number(env["PORT"] ?? "3000");
   await app.listen({ port, host: "0.0.0.0" });
-  app.log.info({ chains }, "cixtech engine listening");
+  app.log.info({ chains, database: db.describe }, "cixtech engine listening");
 
   // Detection loop: poll every configured chain (failures isolated per chain).
   setInterval(() => {
@@ -105,6 +165,17 @@ async function main(): Promise<void> {
       .dispatchDue()
       .catch((err) => console.error("webhook dispatch failed", err));
   }, WEBHOOK_DISPATCH_INTERVAL_MS);
+
+  // Pool cool-off sweeper (ADR 0009): COOLING → AVAILABLE once the window closes,
+  // so addresses are reused and the pool stays bounded.
+  setInterval(() => {
+    void engine
+      .releaseCooledAddresses()
+      .then((n) => {
+        if (n > 0) app.log.info({ released: n }, "pool addresses returned to AVAILABLE");
+      })
+      .catch((err) => console.error("pool release failed", err));
+  }, POOL_RELEASE_INTERVAL_MS);
 }
 
 main().catch((err) => {

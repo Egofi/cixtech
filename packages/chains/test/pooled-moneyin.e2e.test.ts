@@ -7,8 +7,8 @@ import {
 } from "@cixtech/attribution";
 import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore, splitFee } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
+import { freshDatabase } from "@cixtech/testing";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
-import { PGlite } from "@electric-sql/pglite";
 import { HDKey } from "@scure/bip32";
 import { describe, expect, it } from "vitest";
 import type { ChainDeposit } from "../src/chain-adapter.js";
@@ -22,24 +22,11 @@ const FEE = LedgerAccountKey("egofi_fee_revenue:t1");
 const seed = Uint8Array.from(Buffer.from("000102030405060708090a0b0c0d0e0f", "hex"));
 const XPUB = HDKey.fromMasterSeed(seed).derive("m/44'/195'/0'").publicExtendedKey;
 
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
-
 async function setup() {
-  const db = new PGlite();
+  const db = await freshDatabase();
   await db.exec(LEDGER_SCHEMA_SQL);
   await db.exec(POOL_SCHEMA_SQL);
-  const sql = wrap(db);
+  const sql = db.sql;
   const ledger = new LedgerService(new SqlLedgerStore(sql));
   const store = new SqlPoolStore(sql);
   const pool = new PoolManager(store, (_chain, xpub, i) => deriveTronAddress(xpub, i), {
@@ -60,7 +47,7 @@ const deposit = (to: string, txId: string, value: string): ChainDeposit => ({
 });
 
 describe("pooled-address money-in (real Tron derivation)", () => {
-  it("assigns a real derived address, credits a deposit to it, and marks it IN_USE", async () => {
+  it("assigns a real derived address, credits a deposit to it, and starts its cool-off", async () => {
     const { ledger, pool, store, ingestor } = await setup();
     const addr = await pool.assign("t1", "m1", "TRON", "inv-1", XPUB);
     expect(addr.startsWith("T")).toBe(true); // a real base58 Tron address
@@ -72,7 +59,11 @@ describe("pooled-address money-in (real Tron derivation)", () => {
     const { net, fee } = splitFee(1_000_000n, 50);
     expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(net);
     expect(await ledger.availableBalance(FEE, USDT)).toBe(fee);
-    expect((await store.findByAddress("TRON", addr))?.state).toBe(PoolState.InUse);
+    // Crediting happens at finality, which is exactly when cool-off starts (ADR
+    // 0009) — the address is COOLING, not parked in IN_USE forever.
+    const credited = await store.findByAddress("TRON", addr);
+    expect(credited?.state).toBe(PoolState.Cooling);
+    expect(credited?.cooldownUntil).toBeInstanceOf(Date);
   });
 
   it("does not credit a deposit to an address that was never assigned", async () => {

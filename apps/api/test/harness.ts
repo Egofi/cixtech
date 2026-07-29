@@ -9,11 +9,11 @@ import {
   SqlKillSwitch,
   deriveTronAddress,
 } from "@cixtech/chains";
-import { PGlite } from "@electric-sql/pglite";
+import { freshDatabase } from "@cixtech/testing";
 import { HDKey } from "@scure/bip32";
 import { buildApp } from "../src/app.js";
 import { buildEngine } from "../src/engine.js";
-import { applySchemas, pgliteClient } from "../src/sql.js";
+import { applySchemas } from "../src/sql.js";
 import type { WebhookPoster } from "../src/webhooks.js";
 
 export const DEST = "TTetbYe8bRMfz6ASefJACCb2gSzwbe9AqW";
@@ -73,11 +73,11 @@ function fakeRouter(o: Overrides, broadcaster: PayoutBroadcaster): ChainRouter {
   return router;
 }
 
-/** Build a full API + engine on a fresh PGlite, with overridable chain edges. */
+/** Build a full API + engine on a fresh Postgres schema, with overridable chain edges. */
 export async function makeApi(o: Overrides = {}) {
-  const db = new PGlite();
-  await applySchemas(db);
-  const sql = pgliteClient(db);
+  const db = await freshDatabase();
+  const sql = db.sql;
+  await applySchemas(sql);
   const broadcaster = new FakeBroadcaster();
   const engine = buildEngine({
     sql,

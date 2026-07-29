@@ -1,22 +1,9 @@
 import { EvmAdapter, EvmRpc, type HttpClient, toQuantity } from "@cixtech/chains";
 import type { SqlClient } from "@cixtech/ledger";
-import { PGlite } from "@electric-sql/pglite";
+import { freshDatabase } from "@cixtech/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 import { CURSOR_SCHEMA_SQL, DepositCursorStore } from "../src/chains/deposit-cursor.js";
 import { EvmDepositSource } from "../src/chains/evm-deposit-source.js";
-
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
 
 const USDC = "0x1234567890abcdef1234567890abcdef12345678";
 const POOL = "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359";
@@ -69,9 +56,9 @@ function scriptedRpc(state: { head: bigint; logsByFrom: Map<string, number> }): 
 describe("EvmDepositSource durable cursor", () => {
   let sql: SqlClient;
   beforeEach(async () => {
-    const db = new PGlite();
+    const db = await freshDatabase();
     await db.exec(CURSOR_SCHEMA_SQL);
-    sql = wrap(db);
+    sql = db.sql;
   });
 
   it("seeds the cursor behind the head, then advances and never rescans", async () => {

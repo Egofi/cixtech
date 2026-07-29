@@ -1,0 +1,41 @@
+Where the build actually is
+The README claims "Step 1 complete." That's badly stale — you're through most of step 6. Against build spec §17:
+
+Step	State
+1. Ledger + config spine	✅ done, property-tested
+2. Signer port + one chain E2E	✅ Tron end-to-end, live-tested on Nile
+3. Pool lifecycle / gas station / treasury	⚠️ half — pool assigns but never releases; gas station written, never wired
+4. Policy + approvals + breaker	⚠️ mostly — approvals are a dead end (below)
+5. In-house TSS	⚠️ interim per ADR 0014; reconstruct-to-sign seam, correctly fenced
+6. Chain expansion	⚠️ Tron + 4 EVM; no GatherStrategy port at all; no BTC/LTC/XRP
+7. Compliance	❌ ports only, nothing wired; no PoR
+8. Multi-tenant API + webhooks	✅ + admin console + portal + Scalar docs (beyond spec)
+The four findings that matter
+1. EVM ERC-20 payouts cannot succeed in production. evm-broadcaster.ts:70 signs an EIP-1559 tx from the pool address, so gas is paid from that address's native balance. Pool addresses only ever receive USDC/USDT. gas-station.ts exists and is tested — and has zero references anywhere in apps/. First mainnet EVM payout fails on insufficient gas. Tron is fine (fee comes off the signer's TRX).
+
+2. ADR 0011's GatherStrategy port does not exist. Not a partial implementation — zero code, no gather_strategy column on the pool table. The ADR is emphatic that the per-address tag ships before addresses are minted, because "stranding is the failure mode to engineer against." Every address minted from today onward is untagged, and this gets strictly more expensive with pool size. Cheapest fix you will ever have.
+
+3. The pool lifecycle stalls at IN_USE forever. markInUse is called by the ingestor; cool() and releaseCooled() have no callers outside tests. Addresses never return to AVAILABLE, so claimAvailable always misses and assign mints a fresh index every time. The pool is unbounded — which dissolves ADR 0009's entire thesis ("500 deposits across a 10-address pool accumulate into 10 addresses, not 500") and makes payout gather cost scale with deposit count.
+
+4. A payout over the approval threshold is a black hole. PolicyEngine correctly returns REQUIRE_APPROVAL → 202, but there is no POST /v1/withdrawals/{id}/approve route (spec §16), and api_key has no scope column — so read/move-funds/approve don't exist and one key does everything. Dual control is currently unenforceable even if the endpoint existed.
+
+Also missing, lower urgency
+Operational plane: spec §8 lists 11 queues. You have 2 setIntervals (detection, webhooks). No BullMQ/Redis at all. ExternalReconciler written, never wired. No fee-sweep, no internal reconciler loop, no drift→circuit-breaker.
+Production DB is PGlite — server.ts:23 hardcodes it. WASM, single-process, no PITR, no second node. ADR 0013 assumes a swappable SqlClient; there's no pg adapter or migration runner.
+The pool assumption has leaked into the core, which the spec explicitly forbids. app.ts:311 calls engine.pool.assign() directly rather than going through AttributionStrategy. XRP (SharedAccountTagStrategy) cannot be added without refactoring the route.
+Compliance ≈ 0: DepositScreener unwired, sanctions is a static Set, no Travel Rule, no case management. Proof of reserves: no code — it's a licence requirement (ADR 0008/0010).
+Missing §16 routes: /v1/transfers, /v1/statements, /v1/proof-of-reserves. No request signing/replay protection. No policy dry-run, no PolicyVersion with delayed effect.
+Structure deviates from §1 (no apps/worker, apps/coordinator, nodes/signer, @cixtech/sdk); Fastify replaced NestJS. Both are defensible calls but undocumented — they deserve ADRs 0017/0018, since the spec still reads NestJS.
+docs/painpoints.md is untracked and is egofi/PSP-layer material, not engine material — it has no home in this repo's narrative.
+
+
+Recommended next commit
+Close the money path before adding surface area — one focused commit:
+
+GatherStrategy port + gather_strategy column, dispatch per-address on the tag, EOA_FUND_TRANSFER as the sole implementation (forwarders later, same port)
+Wire GasStation into the payout path so EVM gathers fund the address before signing
+Pool release job: cool() on finality + releaseCooled() on a timer
+POST /v1/withdrawals/{id}/approve + scoped API keys
+Items 1–3 are one coherent unit — they're all "the gather actually works." Item 4 is separable.
+
+Want me to start there, or would you rather I take a different tier first (the job runner + reconcilers, the real Postgres adapter, or XRP to prove the attribution port)?

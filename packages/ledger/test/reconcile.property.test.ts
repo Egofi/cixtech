@@ -1,8 +1,8 @@
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
 import fc from "fast-check";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { JournalEntry } from "../src/entry.js";
-import { type Harness, freshStore, reset } from "./pglite.js";
+import { type Harness, close, freshStore, reset } from "./postgres.js";
 
 const A = LedgerAccountKey("pool_addr:TRON:m1");
 const B = LedgerAccountKey("merchant_available:t1:m1");
@@ -21,10 +21,14 @@ function entry(tag: string, amount: bigint): JournalEntry {
   };
 }
 
-describe("persistence: internal reconciler (PGlite)", () => {
+describe("persistence: internal reconciler (Postgres)", () => {
   let h: Harness;
   beforeAll(async () => {
     h = await freshStore();
+  });
+
+  afterAll(async () => {
+    await close(h);
   });
 
   // Property 12 — no drift on a consistent ledger, and NON-zero drift the moment a
@@ -36,7 +40,7 @@ describe("persistence: internal reconciler (PGlite)", () => {
         fc.array(fc.bigInt({ min: 1n, max: 10n ** 18n }), { minLength: 1, maxLength: 20 }),
         async (amounts) => {
           await reset(h);
-          const { db, store } = h;
+          const { sql, store } = h;
           for (let i = 0; i < amounts.length; i++) {
             await store.append(entry(`e${i}`, amounts[i] as bigint));
           }
@@ -45,7 +49,7 @@ describe("persistence: internal reconciler (PGlite)", () => {
           expect(await store.reconcileInternal()).toEqual([]);
 
           // Tamper with one posting directly, bypassing the store.
-          await db.query("UPDATE posting SET amount = amount + 1 WHERE account = $1", [A]);
+          await sql.query("UPDATE posting SET amount = amount + 1 WHERE account = $1", [A]);
 
           const drift = await store.reconcileInternal();
           expect(drift.length).toBeGreaterThan(0);

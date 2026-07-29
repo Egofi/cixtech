@@ -90,7 +90,7 @@ returns the original — never a second set of postings.
 
 Vitest + **fast-check**. Algebraic properties run against `memory-store`;
 persistence/concurrency properties run against `prisma-store` on a
-testcontainers Postgres.
+real PostgreSQL server that the suite starts itself (`@cixtech/testing`).
 
 **Balance & entry algebra**
 1. Every accepted entry sums to zero per asset; an unbalanced entry is **always
@@ -136,7 +136,9 @@ testcontainers Postgres.
 
 - **Vitest** unit + property; **fast-check** generators for accounts, amounts
   (full `Decimal(36,18)` range), and event histories.
-- **@testcontainers/postgresql** for persistence/concurrency properties.
+- **`@cixtech/testing`** starts a real PostgreSQL (`embedded-postgres`, no Docker)
+  once per package and hands each test its own schema — persistence and
+  concurrency properties need a real server with real connections.
 - **Biome** + the custom `no-magic-constants` rule, wired into the CI gate
   (`CUSTODY_ENGINE_BUILD_SPEC.md` §3) so `packages/ledger` + `packages/policy`
   cannot merge without property tests.

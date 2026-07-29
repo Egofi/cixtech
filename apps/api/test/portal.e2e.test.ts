@@ -70,7 +70,8 @@ describe("tenant portal + activity APIs", () => {
       url: `/v1/accounts/${accountId}/deposit-addresses`,
       headers: auth(apiKey),
     });
-    expect(addrs.json().addresses).toMatchObject([{ chain: "TRON", address, state: "IN_USE" }]);
+    // Credited at finality → the address is already cooling down for reuse.
+    expect(addrs.json().addresses).toMatchObject([{ chain: "TRON", address, state: "COOLING" }]);
 
     // Balances across accounts (10M minus 0.5% fee).
     const bal = await app.inject({ method: "GET", url: "/v1/balances", headers: auth(apiKey) });

@@ -1,13 +1,14 @@
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
 import fc from "fast-check";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { JournalEntry } from "../src/entry.js";
-import { type Harness, freshStore, reset } from "./pglite.js";
+import { type Harness, close, freshStore, reset } from "./postgres.js";
 
-// Real Postgres semantics via PGlite. PGlite serializes concurrently-submitted
-// transactions on one connection, so these verify the append's atomic
-// increment + idempotency invariants under concurrent submission. Multi-node
-// OS-level parallelism is verified separately in CI (testcontainers).
+// Real PostgreSQL, real parallelism: `append` claims one pooled connection per
+// transaction, so these writers genuinely race inside the server the way they
+// will in production. That is the whole point of the suite — a single-connection
+// database serializes the submissions and the properties pass without proving
+// anything. Property 11 in particular only fails under true concurrency.
 
 const A = LedgerAccountKey("pool_addr:TRON:m1");
 const B = LedgerAccountKey("merchant_available:t1:m1");
@@ -26,10 +27,14 @@ function entry(tag: string, amount: bigint): JournalEntry {
   };
 }
 
-describe("persistence: concurrency (PGlite)", () => {
+describe("persistence: concurrency (Postgres)", () => {
   let h: Harness;
   beforeAll(async () => {
     h = await freshStore();
+  });
+
+  afterAll(async () => {
+    await close(h);
   });
 
   // Property 10 — concurrently-submitted appends accumulate exactly; none lost.

@@ -108,7 +108,58 @@ export const withdrawalSchema: FastifySchema = {
         status: { type: "string" },
       },
     },
+    202: {
+      type: "object",
+      description: "Held for approval or a time-lock; no funds have moved.",
+      properties: {
+        withdrawalId: { type: "string" },
+        status: { type: "string" },
+        approvalsNeeded: { type: "integer" },
+        approvalsHave: { type: "integer" },
+        until: { type: "string" },
+      },
+    },
     403: errorResponse,
+    409: errorResponse,
+  },
+};
+
+export const approveWithdrawalSchema: FastifySchema = {
+  summary: "Approve a pending payout",
+  description: [
+    "Records one approval against a payout that is awaiting them.",
+    "",
+    "Requires a key with the `approve` scope, which is deliberately separate from",
+    "`move-funds`: the credential that requested the payout can never approve it,",
+    "and M-of-N counts DISTINCT approvers, so one key cannot clear a threshold by",
+    "approving repeatedly. When the last required approval lands, the payout",
+    "proceeds and this returns its transaction.",
+  ].join("\n"),
+  tags: ["payouts"],
+  params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        withdrawalId: { type: "string" },
+        status: { type: "string" },
+        txId: { type: "string" },
+        from: { type: "string" },
+        approvals: { type: "array", items: { type: "string" } },
+      },
+    },
+    202: {
+      type: "object",
+      description: "Approval recorded; still short of the required quorum.",
+      properties: {
+        withdrawalId: { type: "string" },
+        status: { type: "string" },
+        approvalsNeeded: { type: "integer" },
+        approvalsHave: { type: "integer" },
+      },
+    },
+    403: errorResponse,
+    404: errorResponse,
     409: errorResponse,
   },
 };

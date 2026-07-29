@@ -42,6 +42,12 @@ export class ChainRouter {
     return this;
   }
 
+  /** A chain's family, or undefined if it is not routed. Used to reject a strategy
+   *  the chain structurally cannot run (ADR 0011 — 7702 is EVM-only). */
+  familyOf(chain: string): ChainFamily | undefined {
+    return this.plugins.get(chain.toUpperCase())?.family;
+  }
+
   has(chain: string): boolean {
     return this.plugins.has(chain.toUpperCase());
   }

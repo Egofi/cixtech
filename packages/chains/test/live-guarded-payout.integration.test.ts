@@ -6,8 +6,8 @@ import {
   splitFee,
 } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
+import { freshDatabase } from "@cixtech/testing";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
-import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import { FetchHttpClient } from "../src/http.js";
 import { PayoutService } from "../src/payout/payout-service.js";
@@ -29,24 +29,11 @@ const AVAILABLE = LedgerAccountKey("merchant_available:t1:m1");
 const PENDING = LedgerAccountKey("merchant_pending_withdrawal:t1:m1");
 const POOL = LedgerAccountKey("pool_addr:TRON:m1");
 
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
-
 describe.skipIf(!RUN)("LIVE guarded payout (gated on CIXTECH_LIVE_GUARDED)", () => {
   it("policy → lock → real Nile broadcast → settle, in one call", async () => {
-    const db = new PGlite();
+    const db = await freshDatabase();
     await db.exec(LEDGER_SCHEMA_SQL);
-    const sql = wrap(db);
+    const sql = db.sql;
     const ledger = new LedgerService(new SqlLedgerStore(sql));
     // Seed the merchant with a deposit so there is a balance to pay out.
     await ledger.post(

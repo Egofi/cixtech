@@ -1,4 +1,5 @@
 import { AppError } from "@cixtech/errors";
+import type { GatherStrategyKind } from "./gather-strategy.js";
 import type { PoolManager } from "./pool-manager.js";
 
 /** Reads a pool address's on-chain balance for an asset (the gather source of truth). */
@@ -10,6 +11,12 @@ export interface AddressBalance {
 export interface GatheredSource {
   address: string;
   derivationIndex: number;
+  /**
+   * The strategy this address was minted under (ADR 0011). Carried on the leg so
+   * the payout drains it with the mechanism that created it, whatever the current
+   * toggle says.
+   */
+  gatherStrategy: GatherStrategyKind;
 }
 
 /** One leg of a multi-address gather: how much to pull from this pool address. */
@@ -47,7 +54,11 @@ export class PoolGatherer {
     for (const a of addresses) {
       const bal = await this.balances.balance(chain, a.address, asset);
       if (bal >= amount) {
-        return { address: a.address, derivationIndex: a.derivationIndex };
+        return {
+          address: a.address,
+          derivationIndex: a.derivationIndex,
+          gatherStrategy: a.gatherStrategy,
+        };
       }
     }
     throw new InsufficientPoolFundsError(
@@ -82,7 +93,12 @@ export class PoolGatherer {
     for (const a of addresses) {
       const balance = await this.balances.balance(chain, a.address, asset);
       if (balance > 0n) {
-        funded.push({ address: a.address, derivationIndex: a.derivationIndex, balance });
+        funded.push({
+          address: a.address,
+          derivationIndex: a.derivationIndex,
+          gatherStrategy: a.gatherStrategy,
+          balance,
+        });
       }
     }
     funded.sort((x, y) => (y.balance > x.balance ? 1 : y.balance < x.balance ? -1 : 0));
@@ -92,7 +108,12 @@ export class PoolGatherer {
     for (const f of funded) {
       if (remaining <= 0n) break;
       const take = f.balance < remaining ? f.balance : remaining;
-      legs.push({ address: f.address, derivationIndex: f.derivationIndex, amountBaseUnits: take });
+      legs.push({
+        address: f.address,
+        derivationIndex: f.derivationIndex,
+        gatherStrategy: f.gatherStrategy,
+        amountBaseUnits: take,
+      });
       remaining -= take;
     }
     if (remaining > 0n) {

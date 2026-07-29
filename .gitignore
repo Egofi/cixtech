@@ -8,13 +8,17 @@ coverage/
 .env
 .env.*
 !.env.dev.example
+!.env.example
 *.pem
 
-# Dev runner scratch output + local dev database
-.dev-server.mjs
-.cixtech-dev-db/
+# Test Postgres clusters (embedded, removed when the run ends)
+.test-postgres/
+
+# Dev runner / migrate scratch bundles
+*.bundle.mjs
 
 # MPC / key material must never touch the repo (ADR 0007)
 *.share
 *.keyshare
 keyshares/
+.whereweare

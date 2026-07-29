@@ -1,8 +1,8 @@
 import type { Attribution } from "@cixtech/attribution";
 import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
+import { type TestDatabase, freshDatabase } from "@cixtech/testing";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
-import { PGlite } from "@electric-sql/pglite";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ChainDeposit } from "../src/chain-adapter.js";
 import { DepositIngestor, type DepositScreener } from "../src/ingest/deposit-ingestor.js";
@@ -21,19 +21,6 @@ const attribution: Attribution = {
   },
 };
 
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
-
 const deposit = (over: Partial<ChainDeposit> = {}): ChainDeposit => ({
   chain: "TRON",
   txId: "tx-abc",
@@ -45,13 +32,13 @@ const deposit = (over: Partial<ChainDeposit> = {}): ChainDeposit => ({
   ...over,
 });
 
-let db: PGlite;
+let db: TestDatabase;
 let ledger: LedgerService;
 
 beforeEach(async () => {
-  db = new PGlite();
+  db = await freshDatabase();
   await db.exec(LEDGER_SCHEMA_SQL);
-  ledger = new LedgerService(new SqlLedgerStore(wrap(db)));
+  ledger = new LedgerService(new SqlLedgerStore(db.sql));
 });
 
 describe("DepositIngestor — KYT quarantine (§14)", () => {

@@ -9,8 +9,28 @@ CREATE TABLE IF NOT EXISTS tenant (
 CREATE TABLE IF NOT EXISTS api_key (
   key_hash   text PRIMARY KEY,   -- sha256 of the plaintext key; the key is shown once
   tenant_id  text NOT NULL REFERENCES tenant(id),
+  -- Stable, non-secret identity for this credential (build spec §16). It is what
+  -- separation of duties compares: an approval only counts if it came from a
+  -- DIFFERENT key than the one that requested the payout, so the identity must be
+  -- something we can record without storing the key itself.
+  id         text NOT NULL DEFAULT gen_random_uuid()::text,
+  label      text,
+  -- Scopes: read | move-funds | approve. 'approve' deliberately does NOT imply
+  -- 'move-funds' -- a credential that can rubber-stamp a payout must not also be
+  -- able to request one, or dual control collapses to a single key.
+  scopes     text[] NOT NULL DEFAULT ARRAY['read','move-funds','approve'],
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Upgrade path. Existing keys keep every scope so a live tenant is not locked out
+-- by the migration; newly issued keys are scoped explicitly.
+ALTER TABLE api_key ADD COLUMN IF NOT EXISTS id text;
+ALTER TABLE api_key ADD COLUMN IF NOT EXISTS label text;
+ALTER TABLE api_key ADD COLUMN IF NOT EXISTS scopes text[]
+  NOT NULL DEFAULT ARRAY['read','move-funds','approve'];
+UPDATE api_key SET id = gen_random_uuid()::text WHERE id IS NULL;
+ALTER TABLE api_key ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+CREATE UNIQUE INDEX IF NOT EXISTS api_key_id ON api_key(id);
 
 CREATE TABLE IF NOT EXISTS account (
   id           text PRIMARY KEY,

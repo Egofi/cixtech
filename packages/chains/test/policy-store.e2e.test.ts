@@ -1,5 +1,5 @@
 import type { SqlClient } from "@cixtech/ledger";
-import { PGlite } from "@electric-sql/pglite";
+import { type TestDatabase, freshDatabase } from "@cixtech/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   POLICY_SCHEMA_SQL,
@@ -8,19 +8,6 @@ import {
 } from "../src/payout/policy-store.js";
 import type { PayoutContext } from "../src/payout/policy.js";
 import { PolicyDeniedError, PolicyEngine } from "../src/payout/policy.js";
-
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
 
 const DEST = "TDestination0000000000000000000000";
 const ctx = (over: Partial<PayoutContext> = {}): PayoutContext => ({
@@ -33,13 +20,13 @@ const ctx = (over: Partial<PayoutContext> = {}): PayoutContext => ({
   ...over,
 });
 
-let db: PGlite;
+let db: TestDatabase;
 let sql: SqlClient;
 
 beforeEach(async () => {
-  db = new PGlite();
+  db = await freshDatabase();
   await db.exec(POLICY_SCHEMA_SQL);
-  sql = wrap(db);
+  sql = db.sql;
 });
 
 describe("SqlKillSwitch (durable)", () => {

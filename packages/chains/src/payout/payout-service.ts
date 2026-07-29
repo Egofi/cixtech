@@ -1,10 +1,11 @@
-import type { GatheredLeg, PoolGatherer } from "@cixtech/attribution";
+import type { GatherStrategyRegistry, GatheredLeg, PoolGatherer } from "@cixtech/attribution";
 import { type LedgerService, payoutSettled } from "@cixtech/ledger";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
+import { type ApprovalStore, WithdrawalNotFoundError } from "./approval-store.js";
 import { type AuthorizationSigner, transferCommitment } from "./authorization.js";
 import type { PayoutBroadcaster } from "./broadcaster.js";
-import type { PayoutJournal } from "./payout-journal.js";
-import type { PayoutContext, PolicyEngine } from "./policy.js";
+import type { PayoutIntent, PayoutJournal } from "./payout-journal.js";
+import { ApprovalRequiredError, type PayoutContext, type PolicyEngine } from "./policy.js";
 
 export interface PayoutParams {
   tenant: string;
@@ -47,6 +48,20 @@ export interface PayoutServiceOptions {
   authorizer?: AuthorizationSigner;
   /** Authorization token lifetime. Default 5 minutes. */
   authTtlMs?: number;
+  /**
+   * Durable approvals (§7.4). Present = the service can collect approvals against a
+   * held intent and resume it once the quorum is met.
+   */
+  approvals?: ApprovalStore;
+  /** How many distinct approvals a held payout needs. Mirrors the policy config. */
+  approvalsRequired?: number;
+  /**
+   * Gather strategies (ADR 0011). Each leg is prepared by the strategy its address
+   * was MINTED under — which is what provisions native gas before an ERC-20 /
+   * TRC-20 transfer. Absent = no preparation, which only works on chains whose
+   * fee comes out of the transfer itself (UTXO).
+   */
+  gatherStrategies?: GatherStrategyRegistry;
 }
 
 const DEFAULT_AUTH_TTL_MS = 5 * 60_000;
@@ -71,6 +86,9 @@ export class PayoutService {
   private readonly journal: PayoutJournal | undefined;
   private readonly authorizer: AuthorizationSigner | undefined;
   private readonly authTtlMs: number;
+  private readonly gatherStrategies: GatherStrategyRegistry | undefined;
+  private readonly approvals: ApprovalStore | undefined;
+  private readonly approvalsRequired: number;
 
   constructor(
     private readonly ledger: LedgerService,
@@ -82,6 +100,81 @@ export class PayoutService {
     this.journal = options.journal;
     this.authorizer = options.authorizer;
     this.authTtlMs = options.authTtlMs ?? DEFAULT_AUTH_TTL_MS;
+    this.gatherStrategies = options.gatherStrategies;
+    this.approvals = options.approvals;
+    this.approvalsRequired = options.approvalsRequired ?? 0;
+  }
+
+  /** Look up a recorded intent by its public id — what the approve endpoint addresses. */
+  async findIntent(tenant: string, idempotencyKey: string): Promise<PayoutIntent | null> {
+    return (await this.journal?.load(idempotencyKey)) ?? null;
+  }
+
+  /**
+   * Record one approval against a held payout and, once the quorum is met, resume
+   * it (build spec §7.4, §16).
+   *
+   * Resuming reuses the intent's ORIGINAL idempotency key, so the payout continues
+   * the recorded intent instead of starting a second one — the approval path
+   * inherits the same double-spend safety as a retry.
+   */
+  async approve(input: {
+    tenant: string;
+    withdrawalId: string;
+    approver: string;
+  }): Promise<
+    | { status: "settled"; txId: string; from: string; approvals: string[] }
+    | { status: "pending"; needed: number; approvals: string[] }
+  > {
+    if (!this.journal || !this.approvals) {
+      throw new Error("Approvals need a payout journal and an approval store");
+    }
+    const intent = await this.journal.loadById(input.tenant, input.withdrawalId);
+    if (!intent) {
+      throw new WithdrawalNotFoundError(`No withdrawal ${input.withdrawalId}`, {
+        context: { withdrawalId: input.withdrawalId },
+        exposable: true,
+      });
+    }
+    if (intent.status === "settled") {
+      return {
+        status: "settled",
+        txId: intent.txId ?? "",
+        from: intent.fromAddress ?? "",
+        approvals: await this.approvals.approversFor(intent.idempotencyKey),
+      };
+    }
+
+    // Throws on self-approval; a repeat from the same approver is a no-op.
+    await this.approvals.approve({
+      tenant: input.tenant,
+      intentKey: intent.idempotencyKey,
+      approver: input.approver,
+      requestedBy: intent.requestedBy,
+    });
+    const approvals = await this.approvals.approversFor(intent.idempotencyKey);
+
+    try {
+      const result = await this.payout({
+        tenant: intent.tenant,
+        merchant: intent.merchant,
+        chain: intent.chain,
+        asset: intent.asset,
+        amountBaseUnits: intent.amountBaseUnits,
+        destination: intent.destination,
+        idempotencyKey: intent.idempotencyKey,
+        ...(intent.requestedBy ? { requester: intent.requestedBy } : {}),
+        approvals,
+      });
+      return { status: "settled", txId: result.txId, from: result.from, approvals };
+    } catch (err) {
+      // Still short of quorum (or still time-locked) — the approval is recorded and
+      // the intent stays exactly where it was. Anything else is a real failure.
+      if (err instanceof ApprovalRequiredError) {
+        return { status: "pending", needed: this.approvalsRequired, approvals };
+      }
+      throw err;
+    }
   }
 
   async payout(p: PayoutParams): Promise<PayoutResult> {
@@ -91,6 +184,7 @@ export class PayoutService {
     const intent = this.journal
       ? await this.journal.begin({
           idempotencyKey: p.idempotencyKey,
+          ...(p.requester !== undefined ? { requestedBy: p.requester } : {}),
           tenant: p.tenant,
           merchant: p.merchant,
           chain: p.chain,
@@ -159,6 +253,24 @@ export class PayoutService {
     for (let i = 0; i < legs.length; i++) {
       const leg = legs[i] as GatheredLeg;
       const legKey = legs.length === 1 ? p.idempotencyKey : `${p.idempotencyKey}:${i}`;
+
+      // 4a. Prepare the leg under the strategy THIS ADDRESS WAS MINTED UNDER —
+      //     `leg.gatherStrategy`, never the current global toggle (ADR 0011).
+      //     Dispatching on the toggle would build a transaction the address cannot
+      //     execute and strand its balance. On EVM/Tron this is where the pool
+      //     address gets the native gas an ERC-20/TRC-20 transfer needs; without
+      //     it the broadcast below fails for insufficient gas.
+      if (this.gatherStrategies) {
+        await this.gatherStrategies.forAddress(leg.gatherStrategy).prepare({
+          chain: p.chain,
+          address: leg.address,
+          derivationIndex: leg.derivationIndex,
+          asset: p.asset,
+          amountBaseUnits: leg.amountBaseUnits,
+          idempotencyKey: legKey,
+        });
+      }
+
       const authorization = this.authorizer?.mint(
         {
           intentId: legKey,

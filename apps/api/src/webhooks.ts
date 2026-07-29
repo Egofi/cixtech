@@ -82,12 +82,18 @@ export class WebhookOutbox {
 
   async enqueue(tenantId: string, event: string, data: Record<string, unknown>): Promise<string> {
     const id = randomUUID();
-    const body = JSON.stringify({ id, event, data, ts: new Date().toISOString() });
-    await this.sql.query("INSERT INTO webhook_delivery (id, tenant_id, body) VALUES ($1, $2, $3)", [
-      id,
-      tenantId,
-      body,
-    ]);
+    const now = new Date();
+    const body = JSON.stringify({ id, event, data, ts: now.toISOString() });
+    // `next_attempt` is written from the APPLICATION clock, not the column's
+    // `now()` default, because `claimDue` compares it against an application
+    // clock. Postgres timestamps carry microseconds while a JS `Date` carries
+    // milliseconds, so a server-generated default lands a few microseconds after
+    // the same millisecond on this side and the row reads as not-yet-due. One
+    // clock on both sides of the comparison removes the whole class of problem.
+    await this.sql.query(
+      "INSERT INTO webhook_delivery (id, tenant_id, body, next_attempt) VALUES ($1, $2, $3, $4)",
+      [id, tenantId, body, now.toISOString()],
+    );
     return id;
   }
 

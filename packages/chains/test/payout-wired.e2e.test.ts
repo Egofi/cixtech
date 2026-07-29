@@ -7,8 +7,8 @@ import {
 } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
 import type { Signer } from "@cixtech/signing";
+import { freshDatabase } from "@cixtech/testing";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
-import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import type { HttpClient } from "../src/http.js";
 import { PayoutService } from "../src/payout/payout-service.js";
@@ -26,19 +26,6 @@ const USDT = Asset("USDT");
 const AVAILABLE = LedgerAccountKey("merchant_available:t1:m1");
 const PENDING = LedgerAccountKey("merchant_pending_withdrawal:t1:m1");
 const POOL = LedgerAccountKey("pool_addr:TRON:m1");
-
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
 
 /** Records POSTs and returns canned node responses — the network stand-in. */
 class FakeHttp implements HttpClient {
@@ -63,9 +50,9 @@ const signer: Signer = {
 };
 
 async function setup() {
-  const db = new PGlite();
+  const db = await freshDatabase();
   await db.exec(LEDGER_SCHEMA_SQL);
-  const sql = wrap(db);
+  const sql = db.sql;
   const ledger = new LedgerService(new SqlLedgerStore(sql));
   await ledger.post(
     depositFinalized({

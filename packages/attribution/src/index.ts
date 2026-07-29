@@ -5,3 +5,6 @@ export * from "./sql-pool-store.js";
 export * from "./pool-manager.js";
 export * from "./pool-gatherer.js";
 export * from "./pooled-attribution.js";
+export * from "./gather-strategy.js";
+export * from "./gather-config.js";
+export * from "./eoa-gather-strategy.js";

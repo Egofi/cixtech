@@ -7,8 +7,8 @@ import {
   depositFinalized,
 } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
+import { type TestDatabase, freshDatabase } from "@cixtech/testing";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
-import { PGlite } from "@electric-sql/pglite";
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
   BroadcastResult,
@@ -18,19 +18,6 @@ import type {
 import { PAYOUT_JOURNAL_SCHEMA_SQL, PayoutJournal } from "../src/payout/payout-journal.js";
 import { PayoutService } from "../src/payout/payout-service.js";
 import { PolicyEngine } from "../src/payout/policy.js";
-
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
 
 const USDT = Asset("USDT");
 const DEST = "TDestination0000000000000000000000";
@@ -54,7 +41,7 @@ class IdempotentBroadcaster implements PayoutBroadcaster {
 
 const policy = new PolicyEngine({ maxPerPayoutBaseUnits: 10n ** 18n, allowlist: new Set([DEST]) });
 
-let db: PGlite;
+let db: TestDatabase;
 let sql: SqlClient;
 let ledger: LedgerService;
 let journal: PayoutJournal;
@@ -68,11 +55,11 @@ async function fundAddress(address: string, index: number): Promise<PoolManager>
 }
 
 beforeEach(async () => {
-  db = new PGlite();
+  db = await freshDatabase();
   await db.exec(LEDGER_SCHEMA_SQL);
   await db.exec(POOL_SCHEMA_SQL);
   await db.exec(PAYOUT_JOURNAL_SCHEMA_SQL);
-  sql = wrap(db);
+  sql = db.sql;
   ledger = new LedgerService(new SqlLedgerStore(sql));
   await ledger.post(
     depositFinalized({

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { PoolManager } from "../src/pool-manager.js";
 import { InvalidPoolTransitionError, PoolState } from "../src/pool-state.js";
 import { SqlPoolStore } from "../src/sql-pool-store.js";
-import { fakeDerive, freshPool } from "./pglite.js";
+import { fakeDerive, freshPool } from "./postgres.js";
 
 const T = "t1";
 const M = "m1";

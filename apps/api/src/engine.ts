@@ -1,5 +1,13 @@
-import { PoolGatherer, PoolManager, PooledAttribution, SqlPoolStore } from "@cixtech/attribution";
 import {
+  GatherConfigStore,
+  type GatherStrategyRegistry,
+  PoolGatherer,
+  PoolManager,
+  PooledAttribution,
+  SqlPoolStore,
+} from "@cixtech/attribution";
+import {
+  ApprovalStore,
   AuthorizationSigner,
   AuthorizingBroadcaster,
   type ChainRouter,
@@ -49,12 +57,23 @@ export interface EngineConfig {
   depositScreener?: DepositScreener;
   /** Cool-down applied to a tenant-added allow-list destination (§7.2). Default 24h. */
   allowlistCooldownMs?: number;
+  /**
+   * Gather strategies (ADR 0011). New addresses mint under the configured toggle;
+   * every payout leg is prepared by the strategy ITS address was minted under —
+   * which is what provisions native gas before an ERC-20/TRC-20 transfer.
+   */
+  gatherStrategies?: GatherStrategyRegistry;
+  /** How long an address cools off before returning to the pool (ADR 0009). */
+  poolCooldownMs?: number;
+  /** Distinct approvals a held payout needs (§7.4). Mirrors the policy config. */
+  approvalsRequired?: number;
 }
 
 const DEFAULT_ALLOWLIST_COOLDOWN_MS = 24 * 60 * 60_000;
 
 export interface Engine {
   sql: SqlClient;
+  gatherConfig: GatherConfigStore;
   chains: ChainRouter;
   tenants: TenantStore;
   ledger: LedgerService;
@@ -69,12 +88,23 @@ export interface Engine {
   allowlist: SqlAllowlist;
   allowlistCooldownMs: number;
   engineXpub: string;
+  /**
+   * Return every address whose cool-off has elapsed to the pool (ADR 0009).
+   * Without this running on a timer the lifecycle stalls at COOLING, every
+   * assignment mints a fresh index, and the pool — whose whole job is to BOUND
+   * payout gather cost — grows without limit.
+   */
+  releaseCooledAddresses(now?: Date): Promise<number>;
 }
 
 export function buildEngine(cfg: EngineConfig): Engine {
   const ledger = new LedgerService(new SqlLedgerStore(cfg.sql));
+  const gatherConfig = new GatherConfigStore(cfg.sql, (chain) => cfg.chains.familyOf(chain));
   const pool = new PoolManager(new SqlPoolStore(cfg.sql), cfg.chains.deriveAddress, {
-    cooldownMs: COOLDOWN_MS,
+    cooldownMs: cfg.poolCooldownMs ?? COOLDOWN_MS,
+    // Resolved once per mint and stored on the address; draining reads the stored
+    // tag, never this toggle (ADR 0011).
+    activeStrategy: (chain, tenant) => gatherConfig.activeFor(chain, tenant),
   });
   const gatherer = new PoolGatherer(pool, cfg.chains.balances);
 
@@ -90,7 +120,12 @@ export function buildEngine(cfg: EngineConfig): Engine {
   const payouts = new PayoutService(ledger, cfg.policy, broadcaster, gatherer, {
     // Durable intent journal: crash-recoverable, and a retry never double-broadcasts.
     journal: new PayoutJournal(cfg.sql),
+    // Durable approvals so a held payout survives a restart and can be signed off
+    // by a different credential later (§7.4).
+    approvals: new ApprovalStore(cfg.sql),
+    ...(cfg.approvalsRequired !== undefined ? { approvalsRequired: cfg.approvalsRequired } : {}),
     ...(authorizer ? { authorizer } : {}),
+    ...(cfg.gatherStrategies ? { gatherStrategies: cfg.gatherStrategies } : {}),
   });
   const ingestor = new DepositIngestor(
     ledger,
@@ -109,6 +144,7 @@ export function buildEngine(cfg: EngineConfig): Engine {
 
   return {
     sql: cfg.sql,
+    gatherConfig,
     chains: cfg.chains,
     tenants: new TenantStore(cfg.sql),
     ledger,
@@ -123,5 +159,6 @@ export function buildEngine(cfg: EngineConfig): Engine {
     allowlist: new SqlAllowlist(cfg.sql),
     allowlistCooldownMs: cfg.allowlistCooldownMs ?? DEFAULT_ALLOWLIST_COOLDOWN_MS,
     engineXpub: cfg.engineXpub,
+    releaseCooledAddresses: (now = new Date()) => pool.releaseCooled(now),
   };
 }

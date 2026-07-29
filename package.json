@@ -13,13 +13,14 @@
     "typecheck": "turbo run typecheck",
     "lint": "biome check --write .",
     "check": "biome check --write .",
-    "guard:constants": "node tooling/no-magic-constants/check.mjs packages"
+    "guard:constants": "node tooling/no-magic-constants/check.mjs packages",
+    "dev": "node apps/api/dev-run.mjs",
+    "db:migrate": "node apps/api/migrate.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@electric-sql/pglite": "^0.5.4",
-    "@testcontainers/postgresql": "^10.16.0",
     "@types/node": "^22.10.0",
+    "embedded-postgres": "17.10.0-beta.17",
     "fast-check": "^3.23.0",
     "turbo": "^2.3.3",
     "typescript": "^5.7.3",

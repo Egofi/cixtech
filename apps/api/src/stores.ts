@@ -2,9 +2,21 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { AppError } from "@cixtech/errors";
 import type { SqlClient } from "@cixtech/ledger";
 
+/** API-key scopes (build spec §16). `approve` never implies `move-funds`. */
+export const SCOPES = ["read", "move-funds", "approve"] as const;
+export type Scope = (typeof SCOPES)[number];
+
+/** Everything a tenant key is allowed to do, plus the identity it acts as. */
 export interface Tenant {
   id: string;
   name: string;
+  /** Stable id of the API key used — the identity for separation of duties (§7.4). */
+  keyId: string;
+  scopes: readonly Scope[];
+}
+
+export class ForbiddenScopeError extends AppError {
+  readonly code = "FORBIDDEN_SCOPE";
 }
 export interface Account {
   id: string;
@@ -26,28 +38,42 @@ export class TenantStore {
   constructor(private readonly sql: SqlClient) {}
 
   /** Create a tenant + an API key. The plaintext key is returned ONCE and never stored. */
-  async createTenant(name: string): Promise<{ tenant: Tenant; apiKey: string }> {
+  async createTenant(
+    name: string,
+    scopes: readonly Scope[] = SCOPES,
+  ): Promise<{ tenant: Tenant; apiKey: string }> {
     const id = randomUUID();
+    const keyId = randomUUID();
     const apiKey = `cxk_${randomBytes(24).toString("hex")}`;
     await this.sql.query("INSERT INTO tenant (id, name) VALUES ($1, $2)", [id, name]);
-    await this.sql.query("INSERT INTO api_key (key_hash, tenant_id) VALUES ($1, $2)", [
-      hashKey(apiKey),
-      id,
-    ]);
-    return { tenant: { id, name }, apiKey };
+    await this.sql.query(
+      "INSERT INTO api_key (key_hash, tenant_id, id, scopes) VALUES ($1, $2, $3, $4)",
+      [hashKey(apiKey), id, keyId, [...scopes]],
+    );
+    return { tenant: { id, name, keyId, scopes }, apiKey };
   }
 
-  /** Resolve an API key to its tenant, or throw Unauthorized. */
+  /** Resolve an API key to its tenant + scopes, or throw Unauthorized. */
   async authenticate(apiKey: string | undefined): Promise<Tenant> {
     if (!apiKey) throw new UnauthorizedError("Missing API key", { exposable: true });
-    const r = await this.sql.query<{ id: string; name: string }>(
-      `SELECT t.id, t.name FROM api_key k JOIN tenant t ON t.id = k.tenant_id
+    const r = await this.sql.query<{
+      id: string;
+      name: string;
+      key_id: string;
+      scopes: string[] | null;
+    }>(
+      `SELECT t.id, t.name, k.id AS key_id, k.scopes FROM api_key k JOIN tenant t ON t.id = k.tenant_id
        WHERE k.key_hash = $1`,
       [hashKey(apiKey)],
     );
     const row = r.rows[0];
     if (!row) throw new UnauthorizedError("Invalid API key", { exposable: true });
-    return { id: row.id, name: row.name };
+    return {
+      id: row.id,
+      name: row.name,
+      keyId: row.key_id,
+      scopes: (row.scopes ?? [...SCOPES]) as Scope[],
+    };
   }
 
   /**
@@ -55,16 +81,20 @@ export class TenantStore {
    * admin plane). The plaintext is returned once and only its hash is stored;
    * previously issued keys stay valid — revocation is a separate, future concern.
    */
-  async issueKey(tenantId: string): Promise<string> {
+  async issueKey(
+    tenantId: string,
+    scopes: readonly Scope[] = SCOPES,
+    label?: string,
+  ): Promise<string> {
     const r = await this.sql.query<{ id: string }>("SELECT id FROM tenant WHERE id = $1", [
       tenantId,
     ]);
     if (!r.rows[0]) throw new AccountNotFoundError(`Tenant ${tenantId} not found`);
     const apiKey = `cxk_${randomBytes(24).toString("hex")}`;
-    await this.sql.query("INSERT INTO api_key (key_hash, tenant_id) VALUES ($1, $2)", [
-      hashKey(apiKey),
-      tenantId,
-    ]);
+    await this.sql.query(
+      "INSERT INTO api_key (key_hash, tenant_id, id, scopes, label) VALUES ($1, $2, $3, $4, $5)",
+      [hashKey(apiKey), tenantId, randomUUID(), [...scopes], label ?? null],
+    );
     return apiKey;
   }
 

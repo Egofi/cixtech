@@ -1,13 +1,28 @@
 import { AppError } from "@cixtech/errors";
+import type { GatherStrategyKind } from "./gather-strategy.js";
 import { type PoolAction, PoolState, nextPoolState } from "./pool-state.js";
 import type { PoolAddressRow, PoolStore } from "./pool-store.js";
 
 /** Derives a receive address for a chain from a merchant's account xpub at an index. */
 export type AddressDeriver = (chain: string, xpub: string, index: number) => string;
 
+/**
+ * Which strategy NEW addresses mint under (ADR 0011). Reads the current toggle;
+ * the value is then RECORDED on the address and is what drains it forever after.
+ */
+export type ActiveStrategyLookup = (
+  chain: string,
+  tenant: string,
+) => Promise<GatherStrategyKind> | GatherStrategyKind;
+
 export interface PoolManagerConfig {
   /** How long an address cools off after a deposit finalizes + the window closes. */
   cooldownMs: number;
+  /**
+   * Resolves the mint-time strategy. Defaults to fund-then-transfer on plain EOAs,
+   * which is what the engine ships (ADR 0011 sequencing).
+   */
+  activeStrategy?: ActiveStrategyLookup;
 }
 
 export class PoolAddressNotFoundError extends AppError {
@@ -41,6 +56,10 @@ export class PoolManager {
     if (claimed) return claimed.address;
 
     const derivationIndex = await this.store.nextIndex(tenant, merchant, chain);
+    // The strategy is resolved ONCE, here, and stored on the row. Everything
+    // downstream reads the stored tag — never the toggle — so a later flip cannot
+    // strand this address (ADR 0011).
+    const gatherStrategy = await this.resolveStrategy(chain, tenant);
     const address = this.derive(chain, xpub, derivationIndex);
     const row = await this.store.insertReserved({
       tenant,
@@ -49,8 +68,14 @@ export class PoolManager {
       derivationIndex,
       address,
       invoiceId,
+      gatherStrategy,
     });
     return row.address;
+  }
+
+  private async resolveStrategy(chain: string, tenant: string): Promise<GatherStrategyKind> {
+    if (!this.config.activeStrategy) return "EOA_FUND_TRANSFER";
+    return this.config.activeStrategy(chain, tenant);
   }
 
   /** All of a merchant's pool addresses on a chain (for gathering payout sources). */

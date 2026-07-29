@@ -5,8 +5,8 @@ import {
   depositFinalized,
 } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
+import { freshDatabase } from "@cixtech/testing";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
-import { PGlite } from "@electric-sql/pglite";
 import { HDKey } from "@scure/bip32";
 import { describe, expect, it } from "vitest";
 import { FetchHttpClient } from "../src/http.js";
@@ -33,19 +33,6 @@ const POOL = LedgerAccountKey("pool_addr:TRON:m1");
 const ENGINE_XPRV = HDKey.fromMasterSeed(
   Uint8Array.from(Buffer.from("cafe".repeat(16), "hex")),
 ).derive("m/44'/195'/0'").privateExtendedKey;
-
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
 
 const http = new FetchHttpClient();
 
@@ -86,9 +73,9 @@ describe.skipIf(!RUN)("LIVE HD pool-key payout (gated on CIXTECH_LIVE_HD)", () =
     await waitForAtLeast(p0, 10_000_000n);
 
     // 2. Pay TRX out of P0, signed by the HD pool key at index 0.
-    const db = new PGlite();
+    const db = await freshDatabase();
     await db.exec(LEDGER_SCHEMA_SQL);
-    const sql = wrap(db);
+    const sql = db.sql;
     const ledger = new LedgerService(new SqlLedgerStore(sql));
     await ledger.post(
       depositFinalized({

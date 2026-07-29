@@ -1,6 +1,6 @@
 # ADR 0011: A swappable gather-strategy port; CREATE2 forwarders at launch, EIP-7702 later
 
-**Status:** Accepted
+**Status:** Accepted — port implemented; `EOA_FUND_TRANSFER` is the shipped strategy (see Implementation)
 
 ## Context
 
@@ -75,3 +75,38 @@ ERC-4337). Those are separate from the deposit-side gather toggle.
   contract must be minimal, immutable, and separately audited.
 - UTXO (BTC/LTC) and XRP are unaffected — they have no gather strategy to select
   (UTXO gathers natively; XRP uses shared-account + tag).
+
+## Implementation (2026-07)
+
+The port and the per-address tag are built, which was the time-critical half: the
+tag has to exist *before* addresses do, and every address minted from here carries
+one.
+
+- **`GatherStrategy`** (`@cixtech/attribution`) with `deriveAddress` and
+  `prepare`. `prepare` is where a strategy makes an address spendable — for
+  fund-then-transfer that means provisioning native gas.
+- **`pool_address.gather_strategy`**, set once at mint from the toggle and never
+  rewritten. `GatheredLeg` carries it, and `PayoutService` resolves the strategy
+  via `registry.forAddress(leg.gatherStrategy)` — the recorded tag, never the
+  current toggle.
+- **`gather_config`** holds the toggle per `(chain, tenant?)` under dual control
+  (requester ≠ approver), and rejects EIP-7702 on non-EVM families.
+- **`EoaFundTransferStrategy`** is the only registered implementation, matching
+  the build spec's "start EOA" sequencing. CREATE2 forwarders and 7702 slot in
+  behind the same port with no caller changes.
+
+**A retired strategy is a loud failure, not a fallback.** `forAddress` throws when
+an address's tag has no registered implementation, and the payout aborts before
+broadcasting. Substituting a different mechanism would build a transaction that
+cannot move those funds — the stranding this ADR exists to prevent, arriving by a
+different route.
+
+**This also fixed a live defect.** EVM ERC-20 payouts could not succeed: the
+transfer is executed *by* the pool address, which holds only the token, and
+nothing provisioned it with native gas. `GasStation` existed but was wired
+nowhere. `prepare` is that seam, and per-chain gas requirements now live in
+`chain-config` rather than as literals.
+
+**Still open.** The `[DECISION]` on the EOA → forwarder volume threshold is
+unchanged; the port is what makes answering it a config change rather than a
+migration.

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SqlClient } from "@cixtech/ledger";
+import type { GatherStrategyKind } from "./gather-strategy.js";
 import { PoolState } from "./pool-state.js";
 import type { NewPoolAddress, PoolAddressRow, PoolStore, StateChange } from "./pool-store.js";
 
@@ -13,10 +14,11 @@ interface Row {
   state: string;
   invoice_id: string | null;
   cooldown_until: string | null;
+  gather_strategy: string;
 }
 
 const COLS =
-  "id, tenant, merchant, chain, derivation_index, address, state, invoice_id, cooldown_until";
+  "id, tenant, merchant, chain, derivation_index, address, state, invoice_id, cooldown_until, gather_strategy";
 
 function toRow(r: Row): PoolAddressRow {
   return {
@@ -29,6 +31,7 @@ function toRow(r: Row): PoolAddressRow {
     state: r.state as PoolState,
     invoiceId: r.invoice_id,
     cooldownUntil: r.cooldown_until ? new Date(r.cooldown_until) : null,
+    gatherStrategy: r.gather_strategy as GatherStrategyKind,
   };
 }
 
@@ -68,8 +71,8 @@ export class SqlPoolStore implements PoolStore {
 
   async insertReserved(row: NewPoolAddress): Promise<PoolAddressRow> {
     const r = await this.sql.query<Row>(
-      `INSERT INTO pool_address (id, tenant, merchant, chain, derivation_index, address, state, invoice_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO pool_address (id, tenant, merchant, chain, derivation_index, address, state, invoice_id, gather_strategy)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING ${COLS}`,
       [
         randomUUID(),
@@ -80,6 +83,7 @@ export class SqlPoolStore implements PoolStore {
         row.address,
         PoolState.Reserved,
         row.invoiceId,
+        row.gatherStrategy,
       ],
     );
     const inserted = r.rows[0];

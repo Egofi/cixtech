@@ -6,7 +6,7 @@ import {
   SqlPoolStore,
 } from "@cixtech/attribution";
 import type { SqlClient } from "@cixtech/ledger";
-import type { PGlite } from "@electric-sql/pglite";
+import { type TestDatabase, freshDatabase } from "@cixtech/testing";
 
 /**
  * A gatherer whose pool holds one address (at index 0) for the merchant, funded
@@ -15,7 +15,7 @@ import type { PGlite } from "@electric-sql/pglite";
  * balance discovery.
  */
 export async function fundedGatherer(
-  db: PGlite,
+  db: TestDatabase,
   sql: SqlClient,
   opts: { tenant: string; merchant: string; chain: string; address: string },
 ): Promise<PoolGatherer> {

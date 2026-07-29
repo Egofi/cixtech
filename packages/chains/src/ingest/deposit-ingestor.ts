@@ -8,9 +8,19 @@ import {
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
 import type { ChainDeposit } from "../chain-adapter.js";
 
-/** Marks a credited deposit's address IN_USE — the pool lifecycle hook (ADR 0009). */
+/**
+ * The pool-address lifecycle hooks (ADR 0009). A deposit drives an address
+ * RESERVED → IN_USE on detection and IN_USE → COOLING once it is credited at
+ * finality; a timer then returns COOLING → AVAILABLE when the cool-off elapses.
+ *
+ * Without `cool` the lifecycle stalls at IN_USE forever: `claimAvailable` never
+ * finds a reusable address, every assignment mints a fresh index, and the pool
+ * grows without bound — which dissolves ADR 0009's core property that a bounded
+ * pool bounds payout gather cost.
+ */
 export interface AddressLifecycle {
   markInUse(chain: string, address: string): Promise<unknown>;
+  cool(chain: string, address: string): Promise<unknown>;
 }
 
 /**
@@ -73,7 +83,9 @@ export class DepositIngestor {
           complianceSuspense: LedgerAccountKey(`compliance_suspense:${attr.tenant}`),
         }),
       );
-      // Still advance the address state — the funds physically landed in it.
+      // Still advance the address state — the funds physically landed in it. A
+      // quarantined deposit does NOT cool: the address stays IN_USE until
+      // compliance decides, so it is never reassigned while under review.
       if (applied && this.lifecycle) await this.lifecycle.markInUse(d.chain, d.to).catch(() => {});
       return { status: applied ? "quarantined" : "duplicate", ref };
     }
@@ -92,8 +104,17 @@ export class DepositIngestor {
     const { applied } = await this.ledger.post(entry);
     if (applied && this.lifecycle) {
       // Best-effort: the credit is committed; advancing the address state must not
-      // undo it. A RESERVED→IN_USE miss is reconciled by the pool sweeper.
-      await this.lifecycle.markInUse(d.chain, d.to).catch(() => {});
+      // undo it. A missed transition is reconciled by the pool sweeper.
+      //
+      // This call site IS finality — `ingestConfirmed`'s precondition — so the
+      // address starts cooling here, not at a sweep. Cool-off runs from now and
+      // must also outlast the payment window + grace, so a late payment to an
+      // expired invoice is not mis-attributed to whoever gets the address next
+      // (ADR 0009).
+      await this.lifecycle
+        .markInUse(d.chain, d.to)
+        .then(() => this.lifecycle?.cool(d.chain, d.to))
+        .catch(() => {});
     }
     return { status: applied ? "credited" : "duplicate", ref };
   }

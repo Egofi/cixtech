@@ -19,6 +19,7 @@ import { registerPortal } from "./portal/portal-routes.js";
 import { PortalService } from "./portal/portal-service.js";
 import {
   allowlistSchema,
+  approveWithdrawalSchema,
   balanceSchema,
   chainsSchema,
   createAccountSchema,
@@ -34,7 +35,7 @@ import {
   setWebhookSchema,
   withdrawalSchema,
 } from "./schemas.js";
-import { type Tenant, UnauthorizedError } from "./stores.js";
+import { ForbiddenScopeError, type Scope, type Tenant, UnauthorizedError } from "./stores.js";
 
 const STATUS: Record<string, number> = {
   UNAUTHORIZED: 401,
@@ -45,14 +46,19 @@ const STATUS: Record<string, number> = {
   POLICY_COMPLIANCE_HOLD: 403,
   AUTHORIZATION_INVALID: 403,
   BAD_REQUEST: 400,
+  FORBIDDEN_SCOPE: 403,
+  POLICY_SELF_APPROVAL: 403,
   VALIDATION: 400,
   UNSUPPORTED_CHAIN: 400,
   LEDGER_INSUFFICIENT_FUNDS: 409,
   LEDGER_UNKNOWN_ENTRY: 409,
+  WITHDRAWAL_NOT_FOUND: 404,
   POOL_INSUFFICIENT_FUNDS: 409,
 };
 
 const WEBHOOK_SECRET_PREFIX = "cxs_";
+/** Policy outcomes that HOLD a payout rather than failing it — the intent survives. */
+const HELD_CODES = new Set(["POLICY_APPROVAL_REQUIRED", "POLICY_TIME_LOCKED"]);
 const DEFAULT_LOGGER: FastifyServerOptions["logger"] = {
   level: process.env["LOG_LEVEL"] ?? "info",
 };
@@ -121,6 +127,20 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
           "stores only its hash). Click **Auth** in the sidebar, paste the key, and",
           "every *Test Request* below sends it automatically.",
           "",
+          "### Scopes",
+          "Keys are scoped, and the split is a security boundary rather than",
+          "convenience:",
+          "",
+          "| Scope | Grants |",
+          "| --- | --- |",
+          "| `read` | every `GET` |",
+          "| `move-funds` | creating accounts, addresses, allow-list entries, payouts |",
+          "| `approve` | approving a payout that is awaiting sign-off |",
+          "",
+          "`approve` does **not** imply `move-funds`. A payout above your approval",
+          "threshold is held, and the credential that requested it can never approve",
+          "it — so completing one always takes two distinct keys.",
+          "",
           "## The flow",
           "1. **Create a sub-account** for each of your merchants/users.",
           "2. **Assign a deposit address** — pooled per account; deposits to it are",
@@ -131,6 +151,9 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
           "4. **Request a payout** — policy-guarded (limits, allow-list, velocity,",
           "   kill-switch, solvency), then signed, broadcast, and settled. The",
           "   `idempotency-key` header makes retries safe: one on-chain transfer, ever.",
+          "5. **Approve it** if policy held it — a `202` returns a `withdrawalId`;",
+          "   `POST /v1/withdrawals/{id}/approve` with an `approve`-scoped key",
+          "   completes it once the quorum is met.",
           "",
           "The tenant dashboard lives at [/portal](/portal).",
         ].join("\n"),
@@ -166,9 +189,21 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   await app.register(scalarApiReference, { routePrefix: "/docs" });
   installMetrics(app);
 
-  const tenantOf = (req: FastifyRequest): Tenant => {
+  /**
+   * The authenticated tenant, asserting the key carries `scope` (build spec §16).
+   * Scopes are checked per route rather than globally because they encode
+   * separation of duties: `approve` must not imply `move-funds`, so a key that can
+   * sign off on a payout cannot also create one.
+   */
+  const tenantOf = (req: FastifyRequest, scope: Scope = "read"): Tenant => {
     const t = authed.get(req);
     if (!t) throw new UnauthorizedError("Not authenticated");
+    if (!t.scopes.includes(scope)) {
+      throw new ForbiddenScopeError(`This API key lacks the '${scope}' scope`, {
+        context: { required: scope, granted: t.scopes.join(",") },
+        exposable: true,
+      });
+    }
     return t;
   };
 
@@ -207,7 +242,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   });
 
   app.put("/v1/webhook", { schema: setWebhookSchema }, async (req, reply) => {
-    const tenant = tenantOf(req);
+    const tenant = tenantOf(req, "move-funds");
     const { url } = req.body as { url: string };
     const secret = `${WEBHOOK_SECRET_PREFIX}${randomUUID().replace(/-/g, "")}`;
     await engine.webhookEndpoints.set(tenant.id, url, secret);
@@ -215,7 +250,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   });
 
   app.post("/v1/accounts", { schema: createAccountSchema }, async (req, reply) => {
-    const tenant = tenantOf(req);
+    const tenant = tenantOf(req, "move-funds");
     const { externalRef } = (req.body ?? {}) as { externalRef?: string };
     const account = await engine.tenants.createAccount(tenant.id, externalRef ?? null);
     await reply.status(201).send({ id: account.id, externalRef: account.externalRef });
@@ -297,7 +332,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     "/v1/accounts/:id/deposit-addresses",
     { schema: depositAddressSchema },
     async (req, reply) => {
-      const tenant = tenantOf(req);
+      const tenant = tenantOf(req, "move-funds");
       const { id } = req.params as { id: string };
       await engine.tenants.requireAccount(tenant.id, id);
       // Canonicalize the chain so stored addresses match the detection loop's keys.
@@ -332,7 +367,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   });
 
   app.post("/v1/accounts/:id/allowlist", { schema: allowlistSchema }, async (req, reply) => {
-    const tenant = tenantOf(req);
+    const tenant = tenantOf(req, "move-funds");
     const { id } = req.params as { id: string };
     await engine.tenants.requireAccount(tenant.id, id);
     const { chain, address } = req.body as { chain: string; address: string };
@@ -351,7 +386,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   });
 
   app.post("/v1/accounts/:id/withdrawals", { schema: withdrawalSchema }, async (req, reply) => {
-    const tenant = tenantOf(req);
+    const tenant = tenantOf(req, "move-funds");
     const { id } = req.params as { id: string };
     await engine.tenants.requireAccount(tenant.id, id);
     const withdrawChain = (req.body as { chain: string }).chain.toUpperCase();
@@ -382,15 +417,77 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
         amountBaseUnits: BigInt(amount),
         destination,
         idempotencyKey: `${tenant.id}:${key}`,
+        // The requesting CREDENTIAL, not the tenant: separation of duties compares
+        // keys, so a second key on the same tenant is a valid approver and this
+        // one never is (§7.4).
+        requester: tenant.keyId,
       });
       const body = { txId: result.txId, from: result.from, status: result.status };
       await engine.idempotency.complete(tenant.id, key, 200, body);
       await reply.send(body);
     } catch (err) {
       await engine.idempotency.release(tenant.id, key);
+      // A payout held for approval or a time-lock is not a failure — the intent is
+      // durably recorded and addressable. Return its id so the caller can route it
+      // to an approver instead of being told only "202" with nowhere to go.
+      const held = await engine.payouts.findIntent(tenant.id, `${tenant.id}:${key}`);
+      if (held && err instanceof AppError && HELD_CODES.has(err.code)) {
+        await reply.status(202).send({
+          withdrawalId: held.id,
+          status: err.code === "POLICY_TIME_LOCKED" ? "TIME_LOCKED" : "PENDING_APPROVAL",
+          ...(typeof err.context?.["needed"] === "number"
+            ? { approvalsNeeded: err.context["needed"] as number }
+            : {}),
+          ...(typeof err.context?.["have"] === "number"
+            ? { approvalsHave: err.context["have"] as number }
+            : {}),
+          ...(typeof err.context?.["until"] === "string"
+            ? { until: err.context["until"] as string }
+            : {}),
+        });
+        return;
+      }
       throw err;
     }
   });
+
+  /**
+   * Record one approval against a held payout (build spec §16, §7.4).
+   *
+   * Needs the `approve` scope, which no `move-funds` key implies — so the
+   * credential that requested the payout structurally cannot approve it. When the
+   * quorum is met the payout resumes on its original idempotency key, which means
+   * it picks up the recorded intent rather than starting a second one.
+   */
+  app.post(
+    "/v1/withdrawals/:id/approve",
+    { schema: approveWithdrawalSchema },
+    async (req, reply) => {
+      const tenant = tenantOf(req, "approve");
+      const { id } = req.params as { id: string };
+      const result = await engine.payouts.approve({
+        tenant: tenant.id,
+        withdrawalId: id,
+        approver: tenant.keyId,
+      });
+      if (result.status === "settled") {
+        await reply.send({
+          withdrawalId: id,
+          status: "settled",
+          txId: result.txId,
+          from: result.from,
+          approvals: result.approvals,
+        });
+        return;
+      }
+      await reply.status(202).send({
+        withdrawalId: id,
+        status: "PENDING_APPROVAL",
+        approvalsNeeded: result.needed,
+        approvalsHave: result.approvals.length,
+      });
+    },
+  );
 
   // Admin console + control plane (ADR 0015): separate bearer auth, all-tenant
   // reads, safe audited controls. Registered even when disabled so /admin returns

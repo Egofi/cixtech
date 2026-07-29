@@ -1,8 +1,8 @@
 import type { Attribution } from "@cixtech/attribution";
 import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
+import { freshDatabase } from "@cixtech/testing";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
-import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import type { ChainDeposit } from "../src/chain-adapter.js";
 import { DepositIngestor } from "../src/ingest/deposit-ingestor.js";
@@ -24,23 +24,10 @@ const attribution: Attribution = {
   },
 };
 
-function wrap(db: PGlite): SqlClient {
-  const w = (q: { query: PGlite["query"]; transaction: PGlite["transaction"] }): SqlClient => ({
-    async query<R>(text: string, params?: readonly unknown[]) {
-      const r = await q.query(text, params ? [...params] : []);
-      return { rows: r.rows as R[] };
-    },
-    async transaction<T>(fn: (tx: SqlClient) => Promise<T>) {
-      return q.transaction((tx) => fn(w(tx as unknown as typeof q)));
-    },
-  });
-  return w(db);
-}
-
 async function harness() {
-  const db = new PGlite();
+  const db = await freshDatabase();
   await db.exec(LEDGER_SCHEMA_SQL);
-  const ledger = new LedgerService(new SqlLedgerStore(wrap(db)));
+  const ledger = new LedgerService(new SqlLedgerStore(db.sql));
   return { ledger, ingestor: new DepositIngestor(ledger, attribution) };
 }
 

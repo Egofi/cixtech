@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { SqlClient } from "@cixtech/ledger";
 
 /**
@@ -16,6 +17,13 @@ import type { SqlClient } from "@cixtech/ledger";
 export const PAYOUT_JOURNAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS payout_intent (
   idempotency_key   text PRIMARY KEY,
+  -- Public, non-secret handle for the intent. The idempotency key is tenant-chosen
+  -- and namespaced with the tenant id, so it is not something to put in a URL.
+  id                text NOT NULL DEFAULT gen_random_uuid()::text,
+  -- Who asked for this payout. Separation of duties (§7.4) needs it recorded at
+  -- request time: an approver is only valid if they are NOT the requester, and
+  -- that comparison has to survive a restart.
+  requested_by      text,
   tenant            text NOT NULL,
   merchant          text NOT NULL,
   chain             text NOT NULL,
@@ -31,11 +39,20 @@ CREATE TABLE IF NOT EXISTS payout_intent (
   updated_at        timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS payout_intent_recovery ON payout_intent(status, updated_at);
+
+-- Upgrade path for databases created before these columns existed.
+ALTER TABLE payout_intent ADD COLUMN IF NOT EXISTS id text;
+ALTER TABLE payout_intent ADD COLUMN IF NOT EXISTS requested_by text;
+UPDATE payout_intent SET id = gen_random_uuid()::text WHERE id IS NULL;
+ALTER TABLE payout_intent ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+CREATE UNIQUE INDEX IF NOT EXISTS payout_intent_id ON payout_intent(id);
 `;
 
 export type PayoutIntentStatus = "locked" | "broadcasting" | "broadcast" | "settled" | "failed";
 
 export interface PayoutIntent {
+  /** Public handle — what `/v1/withdrawals/{id}/approve` addresses. */
+  id: string;
   idempotencyKey: string;
   tenant: string;
   merchant: string;
@@ -46,10 +63,13 @@ export interface PayoutIntent {
   fromAddress: string | null;
   txId: string | null;
   status: PayoutIntentStatus;
+  /** Identity that requested the payout; never counts as one of its own approvers. */
+  requestedBy: string | null;
   createdAt: Date;
 }
 
 interface IntentRow {
+  id: string;
   idempotency_key: string;
   tenant: string;
   merchant: string;
@@ -60,10 +80,12 @@ interface IntentRow {
   from_address: string | null;
   tx_id: string | null;
   status: PayoutIntentStatus;
+  requested_by: string | null;
   created_at: string;
 }
 
 const toIntent = (r: IntentRow): PayoutIntent => ({
+  id: r.id,
   idempotencyKey: r.idempotency_key,
   tenant: r.tenant,
   merchant: r.merchant,
@@ -74,11 +96,14 @@ const toIntent = (r: IntentRow): PayoutIntent => ({
   fromAddress: r.from_address,
   txId: r.tx_id,
   status: r.status,
+  requestedBy: r.requested_by,
   createdAt: new Date(r.created_at),
 });
 
 export interface NewIntent {
   idempotencyKey: string;
+  /** Identity requesting the payout (§7.4). */
+  requestedBy?: string;
   tenant: string;
   merchant: string;
   chain: string;
@@ -94,10 +119,11 @@ export class PayoutJournal {
   async begin(i: NewIntent): Promise<PayoutIntent> {
     await this.sql.query(
       `INSERT INTO payout_intent
-         (idempotency_key, tenant, merchant, chain, asset, amount_base_units, destination)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (id, idempotency_key, tenant, merchant, chain, asset, amount_base_units, destination, requested_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (idempotency_key) DO NOTHING`,
       [
+        randomUUID(),
         i.idempotencyKey,
         i.tenant,
         i.merchant,
@@ -105,6 +131,7 @@ export class PayoutJournal {
         i.asset,
         i.amountBaseUnits.toString(),
         i.destination,
+        i.requestedBy ?? null,
       ],
     );
     const row = await this.load(i.idempotencyKey);
@@ -116,6 +143,15 @@ export class PayoutJournal {
     const { rows } = await this.sql.query<IntentRow>(
       "SELECT * FROM payout_intent WHERE idempotency_key = $1",
       [key],
+    );
+    return rows[0] ? toIntent(rows[0]) : null;
+  }
+
+  /** Look an intent up by its public id — the handle the approve endpoint uses. */
+  async loadById(tenant: string, id: string): Promise<PayoutIntent | null> {
+    const { rows } = await this.sql.query<IntentRow>(
+      "SELECT * FROM payout_intent WHERE id = $1 AND tenant = $2",
+      [id, tenant],
     );
     return rows[0] ? toIntent(rows[0]) : null;
   }

@@ -1,3 +1,4 @@
+import type { GatherStrategyKind } from "./gather-strategy.js";
 import type { PoolState } from "./pool-state.js";
 
 /**
@@ -17,11 +18,22 @@ CREATE TABLE IF NOT EXISTS pool_address (
   state            text NOT NULL,
   invoice_id       text,
   cooldown_until   timestamptz,
+  -- ADR 0011: the strategy this address was MINTED under. Load-bearing, not
+  -- cosmetic — gather dispatches on this tag, never on the current toggle, so
+  -- flipping the toggle can never strand an already-funded address.
+  gather_strategy  text NOT NULL DEFAULT 'EOA_FUND_TRANSFER',
   created_at       timestamptz NOT NULL DEFAULT now(),
   UNIQUE (chain, address),
   UNIQUE (tenant, merchant, chain, derivation_index)
 );
 CREATE INDEX IF NOT EXISTS pool_address_claim ON pool_address(tenant, merchant, chain, state);
+
+-- Upgrade path for databases created before the column existed. A schema module
+-- must bring an EXISTING database up to date, not only create a new one:
+-- \`CREATE TABLE IF NOT EXISTS\` is a no-op on a table that is already there, so
+-- an additive change needs its own idempotent ALTER or it silently never lands.
+ALTER TABLE pool_address
+  ADD COLUMN IF NOT EXISTS gather_strategy text NOT NULL DEFAULT 'EOA_FUND_TRANSFER';
 `;
 
 export interface PoolAddressRow {
@@ -34,6 +46,8 @@ export interface PoolAddressRow {
   state: PoolState;
   invoiceId: string | null;
   cooldownUntil: Date | null;
+  /** The strategy that minted this address, and the only one that can drain it. */
+  gatherStrategy: GatherStrategyKind;
 }
 
 export interface NewPoolAddress {
@@ -43,6 +57,7 @@ export interface NewPoolAddress {
   derivationIndex: number;
   address: string;
   invoiceId: string;
+  gatherStrategy: GatherStrategyKind;
 }
 
 export interface StateChange {

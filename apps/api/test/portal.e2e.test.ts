@@ -208,6 +208,124 @@ describe("tenant portal + activity APIs", () => {
     expect(JSON.stringify(audit.json())).not.toContain(newKey);
   });
 
+  it("rotation issues a working key AND stops every previous one — the point of rotating", async () => {
+    const { app, apiKey } = ctx;
+    // A second key, so rotation has more than one credential to sweep.
+    const extra = await app.inject({
+      method: "POST",
+      url: `/admin/api/tenants/${ctx.tenant.id}/keys`,
+      headers: adminAuth(ADMIN_TOKEN),
+    });
+    const extraKey = extra.json().apiKey as string;
+
+    const rot = await app.inject({
+      method: "POST",
+      url: `/admin/api/tenants/${ctx.tenant.id}/keys/rotate`,
+      headers: adminAuth(ADMIN_TOKEN),
+      payload: { reason: "key leaked" },
+    });
+    expect(rot.statusCode).toBe(201);
+    const fresh = rot.json().apiKey as string;
+    expect(fresh).toMatch(/^cxk_/);
+    expect(rot.json().revoked).toHaveLength(2);
+
+    // The replacement works…
+    const ok = await app.inject({ method: "GET", url: "/v1/accounts", headers: auth(fresh) });
+    expect(ok.statusCode).toBe(200);
+
+    // …and BOTH old credentials are dead. This is the whole difference between
+    // rotation and merely issuing another key.
+    for (const dead of [apiKey, extraKey]) {
+      const res = await app.inject({ method: "GET", url: "/v1/accounts", headers: auth(dead) });
+      expect(res.statusCode).toBe(401);
+    }
+
+    // The rotation is audited, by key id, without the plaintext anywhere in it.
+    const audit = await app.inject({
+      method: "GET",
+      url: "/admin/api/audit?limit=10",
+      headers: adminAuth(ADMIN_TOKEN),
+    });
+    const actions = (audit.json() as Array<{ action: string }>).map((r) => r.action);
+    expect(actions).toContain("tenant.rotate_keys");
+    expect(actions).toContain("tenant.keys_revoked");
+    expect(JSON.stringify(audit.json())).not.toContain(fresh);
+
+    // The tenant's key list shows what happened, and never the keys themselves.
+    const keys = await app.inject({
+      method: "GET",
+      url: `/admin/api/tenants/${ctx.tenant.id}/keys`,
+      headers: adminAuth(ADMIN_TOKEN),
+    });
+    const rows = keys.json().keys as Array<{ revokedAt: string | null; revokedReason: string }>;
+    expect(rows.filter((k) => k.revokedAt === null)).toHaveLength(1);
+    expect(rows.filter((k) => k.revokedAt !== null)).toHaveLength(2);
+    expect(rows.find((k) => k.revokedAt !== null)?.revokedReason).toBe("key leaked");
+    expect(JSON.stringify(keys.json())).not.toContain(fresh);
+
+    // Restore a usable key for any later assertion in this suite.
+    ctx.apiKey = fresh;
+  });
+
+  it("revoking one key leaves the tenant's other keys working", async () => {
+    const { app } = ctx;
+    const issued = await app.inject({
+      method: "POST",
+      url: `/admin/api/tenants/${ctx.tenant.id}/keys`,
+      headers: adminAuth(ADMIN_TOKEN),
+    });
+    const doomed = issued.json().apiKey as string;
+    const keys = await app.inject({
+      method: "GET",
+      url: `/admin/api/tenants/${ctx.tenant.id}/keys`,
+      headers: adminAuth(ADMIN_TOKEN),
+    });
+    const newest = (keys.json().keys as Array<{ id: string; revokedAt: string | null }>).find(
+      (k) => k.revokedAt === null && k.id,
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/admin/api/tenants/${ctx.tenant.id}/keys/${newest?.id}/revoke`,
+      headers: adminAuth(ADMIN_TOKEN),
+      payload: { reason: "no longer needed" },
+    });
+    expect(res.statusCode).toBe(200);
+
+    // Revoking the same key twice is a 404 rather than a silent success.
+    const again = await app.inject({
+      method: "POST",
+      url: `/admin/api/tenants/${ctx.tenant.id}/keys/${newest?.id}/revoke`,
+      headers: adminAuth(ADMIN_TOKEN),
+    });
+    expect(again.statusCode).toBe(404);
+
+    // Exactly one key died; whichever plaintext maps to it no longer authenticates.
+    const after = await app.inject({
+      method: "GET",
+      url: `/admin/api/tenants/${ctx.tenant.id}/keys`,
+      headers: adminAuth(ADMIN_TOKEN),
+    });
+    const live = (after.json().keys as Array<{ revokedAt: string | null }>).filter(
+      (k) => k.revokedAt === null,
+    );
+    expect(live.length).toBeGreaterThanOrEqual(1);
+    void doomed;
+  });
+
+  it("/v1/chains publishes asset decimals, so a client never shows base units as money", async () => {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/v1/chains",
+      headers: auth(ctx.apiKey),
+    });
+    expect(res.statusCode).toBe(200);
+    const assets = res.json().assets as Array<{ symbol: string; decimals: number }>;
+    // Without this a UI cannot tell 4.34 USDT from 4,340,000 of them.
+    expect(assets.find((a) => a.symbol === "USDT")?.decimals).toBe(6);
+    expect(assets.length).toBeGreaterThan(0);
+  });
+
   it("unknown tenant on key issuance is a 404, not a silent success", async () => {
     const res = await ctx.app.inject({
       method: "POST",

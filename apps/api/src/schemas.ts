@@ -55,7 +55,14 @@ export const depositAddressSchema: FastifySchema = {
   response: {
     201: {
       type: "object",
-      properties: { address: { type: "string" }, chain: { type: "string" } },
+      // `asset` is echoed back so a caller showing the address to a payer can state
+      // which token to send — the commonest way to lose funds is sending the wrong
+      // one to a correct address.
+      properties: {
+        address: { type: "string" },
+        chain: { type: "string" },
+        asset: { type: "string" },
+      },
     },
   },
 };
@@ -165,12 +172,28 @@ export const approveWithdrawalSchema: FastifySchema = {
 };
 
 export const chainsSchema: FastifySchema = {
-  summary: "List the chains this deployment routes",
+  summary: "List the chains this deployment routes, and the assets they carry",
   tags: ["chains"],
   response: {
     200: {
       type: "object",
-      properties: { chains: { type: "array", items: { type: "string" } } },
+      properties: {
+        chains: { type: "array", items: { type: "string" } },
+        // Amounts on every other endpoint are integer base units. Divide by
+        // 10^decimals before showing one to a person.
+        assets: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              symbol: { type: "string" },
+              decimals: { type: "integer" },
+              chains: { type: "array", items: { type: "string" } },
+              native: { type: "boolean" },
+            },
+          },
+        },
+      },
     },
   },
 };

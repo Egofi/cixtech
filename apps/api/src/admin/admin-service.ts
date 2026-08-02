@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { assetRegistry } from "@cixtech/chain-config";
 import { SqlKillSwitch } from "@cixtech/chains";
 import { accountTypeOf, normalBalance } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
@@ -87,7 +88,16 @@ export class AdminService {
         destination: "",
       }),
     ]);
-    return { solvency, counts, killSwitchEngaged: kill, limits: this.limits };
+    // `assets` carries decimals so the console can render base units as money.
+    // Without it every figure here is off by 10^decimals (§16.5 keeps the table
+    // in chain-config, so the console is told rather than guessing).
+    return {
+      solvency,
+      counts,
+      killSwitchEngaged: kill,
+      limits: this.limits,
+      assets: assetRegistry(),
+    };
   }
 
   private async counts() {
@@ -110,7 +120,8 @@ export class AdminService {
     const { rows } = await this.sql.query(
       `SELECT t.id, t.name, t.created_at,
               (SELECT count(*) FROM account a WHERE a.tenant_id = t.id) AS accounts,
-              (SELECT count(*) FROM api_key k WHERE k.tenant_id = t.id) AS api_keys
+              (SELECT count(*) FROM api_key k
+                WHERE k.tenant_id = t.id AND k.revoked_at IS NULL) AS api_keys
          FROM tenant t ORDER BY t.created_at DESC`,
     );
     return rows;
@@ -292,6 +303,26 @@ export class AdminService {
   /** Issue an additional API key for a tenant (lost-key recovery); returned ONCE. */
   issueKey(tenantId: string): Promise<string> {
     return this.engine.tenants.issueKey(tenantId);
+  }
+
+  /** Symbol → decimals, so a display layer never renders base units as money. */
+  assets() {
+    return assetRegistry();
+  }
+
+  /** A tenant's credentials — identity and status only; keys themselves are unrecoverable. */
+  listKeys(tenantId: string) {
+    return this.engine.tenants.listKeys(tenantId);
+  }
+
+  /** Replace every live credential with one new key, atomically. Returned ONCE. */
+  rotateKeys(tenantId: string, reason?: string) {
+    return this.engine.tenants.rotateKeys(tenantId, ...(reason ? [{ reason }] : []));
+  }
+
+  /** Revoke a single credential by id. False when already revoked or unknown. */
+  revokeKey(tenantId: string, keyId: string, reason?: string) {
+    return this.engine.tenants.revokeKey(tenantId, keyId, reason);
   }
 
   /** Append an immutable control-plane audit row (ADR 0015). */

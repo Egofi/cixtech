@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { assetRegistry } from "@cixtech/chain-config";
 import { UnsupportedChainError } from "@cixtech/chains";
 import { AppError, type ErrorSink, captureError } from "@cixtech/errors";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
@@ -256,9 +257,16 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     await reply.status(201).send({ id: account.id, externalRef: account.externalRef });
   });
 
+  // Resolved once at registration: the token registry is static config, and a
+  // display layer that has to ask per request is a display layer that will cache
+  // it wrong.
+  const assets = assetRegistry();
+
   app.get("/v1/chains", { schema: chainsSchema }, async (req) => {
     tenantOf(req);
-    return { chains: engine.chains.chains() };
+    // `assets` carries decimals because the ledger speaks integer base units:
+    // without it a client cannot tell 4.34 USDT from 4,340,000 of them.
+    return { chains: engine.chains.chains(), assets };
   });
 
   // ── Tenant-scoped activity reads (feeds the portal + interactive docs) ────────
@@ -337,6 +345,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
       await engine.tenants.requireAccount(tenant.id, id);
       // Canonicalize the chain so stored addresses match the detection loop's keys.
       const chain = (req.body as { chain: string }).chain.toUpperCase();
+      const asset = (req.body as { asset: string }).asset.toUpperCase();
       // Reject an unroutable chain BEFORE a pool index is consumed.
       if (!engine.chains.has(chain)) {
         throw new UnsupportedChainError(`Chain not supported: ${chain}`, {
@@ -350,7 +359,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
         randomUUID(),
         engine.engineXpub,
       );
-      await reply.status(201).send({ address, chain });
+      await reply.status(201).send({ address, chain, asset });
     },
   );
 

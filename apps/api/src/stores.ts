@@ -63,10 +63,12 @@ export class TenantStore {
       scopes: string[] | null;
     }>(
       `SELECT t.id, t.name, k.id AS key_id, k.scopes FROM api_key k JOIN tenant t ON t.id = k.tenant_id
-       WHERE k.key_hash = $1`,
+       WHERE k.key_hash = $1 AND k.revoked_at IS NULL`,
       [hashKey(apiKey)],
     );
     const row = r.rows[0];
+    // A revoked key is indistinguishable from a wrong one here, deliberately: the
+    // holder of a leaked key learns nothing about whether it was ever valid.
     if (!row) throw new UnauthorizedError("Invalid API key", { exposable: true });
     return {
       id: row.id,
@@ -79,7 +81,8 @@ export class TenantStore {
   /**
    * Issue an ADDITIONAL API key for an existing tenant (lost-key recovery via the
    * admin plane). The plaintext is returned once and only its hash is stored;
-   * previously issued keys stay valid — revocation is a separate, future concern.
+   * previously issued keys stay valid. Use `rotateKeys` when the old ones must
+   * stop working.
    */
   async issueKey(
     tenantId: string,
@@ -96,6 +99,95 @@ export class TenantStore {
       [hashKey(apiKey), tenantId, randomUUID(), [...scopes], label ?? null],
     );
     return apiKey;
+  }
+
+  /** A tenant's credentials — identity and status only; the key itself is unrecoverable. */
+  async listKeys(tenantId: string): Promise<
+    Array<{
+      id: string;
+      label: string | null;
+      scopes: Scope[];
+      createdAt: string;
+      revokedAt: string | null;
+      revokedReason: string | null;
+    }>
+  > {
+    const r = await this.sql.query<{
+      id: string;
+      label: string | null;
+      scopes: string[] | null;
+      created_at: string;
+      revoked_at: string | null;
+      revoked_reason: string | null;
+    }>(
+      `SELECT id, label, scopes, created_at, revoked_at, revoked_reason FROM api_key
+       WHERE tenant_id = $1 ORDER BY created_at DESC`,
+      [tenantId],
+    );
+    return r.rows.map((k) => ({
+      id: k.id,
+      label: k.label,
+      scopes: (k.scopes ?? [...SCOPES]) as Scope[],
+      createdAt: k.created_at,
+      revokedAt: k.revoked_at,
+      revokedReason: k.revoked_reason,
+    }));
+  }
+
+  /**
+   * Rotate a tenant's credentials: mint a replacement and revoke every key that
+   * was live beforehand, in ONE transaction.
+   *
+   * The ordering matters. Issuing first means the tenant is never without a working
+   * credential; revoking only the keys observed inside the transaction means a key
+   * issued concurrently is not caught in the sweep. Doing both atomically is what
+   * stops a crash between the two steps from either locking the tenant out (revoked,
+   * nothing issued) or leaving the leaked key live (issued, nothing revoked).
+   *
+   * Returns the plaintext ONCE, plus the ids of what it retired — the caller audits
+   * the ids, never the key.
+   */
+  async rotateKeys(
+    tenantId: string,
+    opts: { reason?: string; scopes?: readonly Scope[]; label?: string } = {},
+  ): Promise<{ apiKey: string; keyId: string; revokedKeyIds: string[] }> {
+    return this.sql.transaction(async (tx) => {
+      const t = await tx.query<{ id: string }>("SELECT id FROM tenant WHERE id = $1", [tenantId]);
+      if (!t.rows[0]) throw new AccountNotFoundError(`Tenant ${tenantId} not found`);
+
+      const live = await tx.query<{ id: string }>(
+        "SELECT id FROM api_key WHERE tenant_id = $1 AND revoked_at IS NULL",
+        [tenantId],
+      );
+
+      const apiKey = `cxk_${randomBytes(24).toString("hex")}`;
+      const keyId = randomUUID();
+      await tx.query(
+        "INSERT INTO api_key (key_hash, tenant_id, id, scopes, label) VALUES ($1, $2, $3, $4, $5)",
+        [hashKey(apiKey), tenantId, keyId, [...(opts.scopes ?? SCOPES)], opts.label ?? "rotated"],
+      );
+
+      const revokedKeyIds = live.rows.map((k) => k.id);
+      if (revokedKeyIds.length > 0) {
+        await tx.query(
+          `UPDATE api_key SET revoked_at = now(), revoked_reason = $2
+             WHERE id = ANY($1) AND revoked_at IS NULL`,
+          [revokedKeyIds, opts.reason ?? "rotated"],
+        );
+      }
+      return { apiKey, keyId, revokedKeyIds };
+    });
+  }
+
+  /** Revoke ONE credential by its id. Returns false when it was already revoked or unknown. */
+  async revokeKey(tenantId: string, keyId: string, reason?: string): Promise<boolean> {
+    const r = await this.sql.query<{ id: string }>(
+      `UPDATE api_key SET revoked_at = now(), revoked_reason = $3
+         WHERE tenant_id = $1 AND id = $2 AND revoked_at IS NULL
+       RETURNING id`,
+      [tenantId, keyId, reason ?? "revoked"],
+    );
+    return r.rows.length > 0;
   }
 
   /** All of a tenant's sub-accounts, newest first. */

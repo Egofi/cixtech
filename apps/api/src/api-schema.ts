@@ -32,6 +32,15 @@ UPDATE api_key SET id = gen_random_uuid()::text WHERE id IS NULL;
 ALTER TABLE api_key ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
 CREATE UNIQUE INDEX IF NOT EXISTS api_key_id ON api_key(id);
 
+-- Revocation. A leaked key is only contained if it STOPS working, so rotation
+-- issues a replacement and stamps the old one here; authenticate() refuses any
+-- key with this set. The row is kept rather than deleted because api_key.id is
+-- the identity the payout journal and approval trail already reference — a
+-- revoked credential still has to be nameable in an audit years later.
+ALTER TABLE api_key ADD COLUMN IF NOT EXISTS revoked_at timestamptz;
+ALTER TABLE api_key ADD COLUMN IF NOT EXISTS revoked_reason text;
+CREATE INDEX IF NOT EXISTS api_key_tenant_live ON api_key(tenant_id) WHERE revoked_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS account (
   id           text PRIMARY KEY,
   tenant_id    text NOT NULL REFERENCES tenant(id),

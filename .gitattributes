@@ -1,0 +1,29 @@
+# Line endings are a property of the REPO, not of whoever cloned it.
+#
+# Without this file, git falls back to each machine's core.autocrlf. On Windows
+# that is typically `true`, which asks for CRLF in the working tree — but every
+# tool here (the formatter, the bundler, editors) writes LF, so ~200 files sat
+# permanently "modified" with no content difference, burying the files that had
+# actually changed and making `git add -A` a hazard.
+#
+# LF everywhere, declared once. This matches what git already stores, so it
+# rewrites nothing; it only stops git expecting something else on checkout.
+* text=auto eol=lf
+
+# Shell scripts MUST be LF regardless of platform. docker-entrypoint.sh runs as
+# the container's ENTRYPOINT under Alpine's /bin/sh: a CRLF checkout makes the
+# kernel read the shebang as "/bin/sh\r" and the container dies with a bare
+# "no such file or directory" that names a file which plainly exists.
+*.sh text eol=lf
+Dockerfile text eol=lf
+Makefile text eol=lf
+
+# Never touched, whatever they contain.
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.wasm binary
+pnpm-lock.yaml -diff linguist-generated

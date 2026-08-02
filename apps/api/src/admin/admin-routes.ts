@@ -93,6 +93,10 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
   };
 
   app.get("/admin/api/overview", hidden, () => service.overview());
+  // Symbol → decimals, so the console can turn base units into money. Its own
+  // route rather than a field on the overview: every view needs it, and none of
+  // them should have to pull the whole dashboard to get it.
+  app.get("/admin/api/assets", hidden, () => ({ assets: service.assets() }));
   app.get("/admin/api/tenants", hidden, () => service.listTenants());
   app.get("/admin/api/tenants/:id", hidden, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -170,5 +174,51 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
       service.issueKey(id),
     )) as string;
     return reply.status(201).send({ tenantId: id, apiKey });
+  });
+
+  // Credential identity and status. Never the keys themselves — only their hashes
+  // are stored, so a leaked key cannot be read back out of here either.
+  app.get("/admin/api/tenants/:id/keys", hidden, async (req) => {
+    const { id } = req.params as { id: string };
+    return { tenantId: id, keys: await service.listKeys(id) };
+  });
+
+  // Rotation: mint a replacement and revoke every key that was live, atomically.
+  // This is the endpoint for a LEAKED or lost key — unlike `POST .../keys`, the old
+  // credentials stop working. The audit records which key ids were retired.
+  app.post("/admin/api/tenants/:id/keys/rotate", hidden, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const reason = ((req.body ?? {}) as { reason?: string }).reason;
+    const out = (await mutate(req, "tenant.rotate_keys", id, { reason }, async () => {
+      const r = await service.rotateKeys(id, reason);
+      // Audit the ids that were retired, never the plaintext that was issued.
+      return r;
+    })) as Awaited<ReturnType<AdminService["rotateKeys"]>>;
+    await service.recordAudit({
+      actor: ACTOR,
+      action: "tenant.keys_revoked",
+      target: id,
+      params: { revokedKeyIds: out.revokedKeyIds, replacedBy: out.keyId },
+      result: "ok",
+      ip: req.ip,
+    });
+    return reply
+      .status(201)
+      .send({ tenantId: id, apiKey: out.apiKey, keyId: out.keyId, revoked: out.revokedKeyIds });
+  });
+
+  // Revoke ONE credential, leaving the tenant's other keys alone.
+  app.post("/admin/api/tenants/:id/keys/:keyId/revoke", hidden, async (req, reply) => {
+    const { id, keyId } = req.params as { id: string; keyId: string };
+    const reason = ((req.body ?? {}) as { reason?: string }).reason;
+    const ok = await mutate(req, "tenant.revoke_key", id, { keyId, reason }, () =>
+      service.revokeKey(id, keyId, reason),
+    );
+    if (!ok) {
+      return reply
+        .status(404)
+        .send({ error: { code: "NOT_FOUND", message: "key not found or already revoked" } });
+    }
+    return { tenantId: id, keyId, revoked: true };
   });
 }

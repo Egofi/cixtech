@@ -3,7 +3,7 @@
 // No global installs — esbuild ships with the repo's test tooling.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -101,8 +101,10 @@ const BUNDLE_PREFIXES = ["@cixtech/", "@noble/", "@scure/"];
 const externalizeRest = {
   name: "externalize-rest",
   setup(b) {
-    b.onResolve({ filter: /^[^./]/ }, (args) => {
+    b.onResolve({ filter: /.*/ }, (args) => {
+      if (args.kind === "entry-point") return null;
       if (args.path.startsWith("node:")) return { external: true, path: args.path };
+      if (args.path.startsWith(".") || isAbsolute(args.path)) return null;
       if (BUNDLE_PREFIXES.some((p) => args.path.startsWith(p))) return null; // bundle it
       return { external: true, path: args.path }; // fastify, pg, prom-client, zod, …
     });

@@ -56,3 +56,80 @@ export function tokenConfig(env: ChainEnv, chain: string, symbol: string): Token
   if (!cfg) throw new ConfigNotFoundError(`No token config for ${symbol} on ${chain}/${env}`);
   return cfg;
 }
+
+/** Every token configured for one chain in this env. */
+export function chainTokens(env: ChainEnv, chain: string): readonly TokenConfig[] {
+  return Object.values(TOKENS[env][chain.toUpperCase()] ?? {});
+}
+
+/** A symbol as the API presents it: what it is worth, and where it can be held. */
+export interface AssetInfo {
+  readonly symbol: string;
+  /** Base-unit exponent. A UI MUST divide by 10^decimals before showing an amount. */
+  readonly decimals: number;
+  readonly chains: readonly string[];
+  readonly native: boolean;
+}
+
+/**
+ * Every asset symbol in this env, with the decimals a display layer needs.
+ *
+ * The ledger stores integer base units, so a UI that prints them raw is off by
+ * 10^decimals — it reads 4.34 USDT as 4,340,000. Decimals live here and nowhere
+ * else (§16.5), so this is what the API hands out rather than letting each client
+ * carry its own table.
+ *
+ * Keyed by symbol, not (chain, symbol): a symbol that meant different things on
+ * different chains would make an amount ambiguous wherever the ledger records the
+ * asset without a chain (`merchant_available:…` postings do exactly that). Rather
+ * than display a guess, a disagreement throws here — loudly, at boot.
+ */
+export function assetRegistry(env?: ChainEnv): readonly AssetInfo[] {
+  if (env) return registryFor(env);
+  // No env given. Decimals are a property of the TOKEN, not of the network it is
+  // deployed on — per (chain, env) only the contract ADDRESS differs (§16.5). So a
+  // display layer should not have to make CHAIN_ENV a boot requirement just to
+  // render a number. Verify that invariant across every env rather than assume it.
+  const envs = Object.keys(TOKENS) as ChainEnv[];
+  const first = registryFor(envs[0] as ChainEnv);
+  for (const other of envs.slice(1)) {
+    if (JSON.stringify(registryFor(other)) !== JSON.stringify(first)) {
+      throw new ConfigNotFoundError(
+        `Asset decimals differ between ${envs[0]} and ${other}. Pass an explicit env to assetRegistry(); a display layer can no longer be env-agnostic.`,
+      );
+    }
+  }
+  return first;
+}
+
+function registryFor(env: ChainEnv): readonly AssetInfo[] {
+  const bySymbol = new Map<string, { decimals: number; chains: string[]; native: boolean }>();
+  for (const [chain, tokens] of Object.entries(TOKENS[env])) {
+    for (const token of Object.values(tokens)) {
+      const seen = bySymbol.get(token.symbol);
+      if (!seen) {
+        bySymbol.set(token.symbol, {
+          decimals: token.decimals,
+          chains: [chain],
+          native: token.native === true,
+        });
+        continue;
+      }
+      if (seen.decimals !== token.decimals) {
+        const where = seen.chains.join("/");
+        throw new ConfigNotFoundError(
+          `${token.symbol} is ${seen.decimals}-decimal on ${where} but ${token.decimals}-decimal on ${chain}. One symbol cannot mean two amounts — give the tokens distinct symbols, or teach the API to key assets by (chain, symbol).`,
+        );
+      }
+      seen.chains.push(chain);
+    }
+  }
+  return [...bySymbol.entries()]
+    .map(([symbol, v]) => ({
+      symbol,
+      decimals: v.decimals,
+      chains: [...v.chains].sort(),
+      native: v.native,
+    }))
+    .sort((a, b) => a.symbol.localeCompare(b.symbol));
+}

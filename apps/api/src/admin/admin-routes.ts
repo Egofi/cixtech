@@ -93,6 +93,23 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
   };
 
   app.get("/admin/api/overview", hidden, () => service.overview());
+  app.get("/admin/api/earnings", hidden, () => service.earningsAnalysis());
+  app.post("/admin/api/earnings/sweep", hidden, async (req, reply) => {
+    const asset = ((req.body ?? {}) as { asset?: string }).asset ?? "USDT";
+    const res = await mutate(req, "earnings.sweep_fees", asset, { asset }, () =>
+      service.sweepFees(asset),
+    );
+    return reply.status(200).send(res);
+  });
+  app.get("/admin/api/wallets/verify-onchain", hidden, (req, reply) => {
+    const { chain, address, asset } = q(req);
+    if (!chain || !address) {
+      return reply
+        .status(400)
+        .send({ error: { code: "BAD_REQUEST", message: "chain and address required" } });
+    }
+    return service.verifyOnchainWallet(chain, address, asset);
+  });
   // Symbol → decimals, so the console can turn base units into money. Its own
   // route rather than a field on the overview: every view needs it, and none of
   // them should have to pull the whole dashboard to get it.

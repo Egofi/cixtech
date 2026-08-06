@@ -1,3 +1,5 @@
+import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
+import { depositFinalized, LedgerService, SqlLedgerStore } from "@cixtech/ledger";
 import { describe, expect, it } from "vitest";
 import { ADMIN_TOKEN, adminAuth, auth, makeApi } from "./harness.js";
 
@@ -166,5 +168,102 @@ describe("admin console API", () => {
     );
     expect(row?.params).toContain("new-merchant");
     expect(row?.params ?? "").not.toContain("cxk_");
+  });
+
+  it("returns platform earnings analysis summary and tenant breakdown", async () => {
+    const ctx = await makeApi();
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/api/earnings",
+      headers: adminAuth(),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body.summary)).toBe(true);
+    expect(Array.isArray(body.tenantBreakdown)).toBe(true);
+    expect(Array.isArray(body.trends)).toBe(true);
+  });
+
+  it("verifies on-chain wallet balance and returns solvency status", async () => {
+    const ctx = await makeApi();
+    const { address } = await seedDeposit(ctx);
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: `/admin/api/wallets/verify-onchain?chain=TRON&address=${address}&asset=USDT`,
+      headers: adminAuth(),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.chain).toBe("TRON");
+    expect(body.address).toBe(address);
+    expect(body.asset).toBe("USDT");
+    expect(body.explorerUrl).toContain("tronscan");
+    expect(typeof body.ledgerBalance).toBe("string");
+    expect(typeof body.onchainBalance).toBe("string");
+    expect(["EXACT_MATCH", "SURPLUS", "DEFICIT", "UNAVAILABLE"]).toContain(body.status);
+  });
+
+  it("sweeps accrued platform fee revenue into platform treasury without over-sweeping", async () => {
+    const ctx = await makeApi();
+    const ledger = new LedgerService(new SqlLedgerStore(ctx.sql));
+
+    // Post a deposit entry: 1,000,000 units with 50 bps (0.5%) fee = 5,000 fee
+    await ledger.post(
+      depositFinalized({
+        id: JournalEntryId("sweep-dep-1"),
+        idempotencyKey: IdempotencyKey("sweep-dep-1"),
+        asset: Asset("USDT"),
+        amount: 1_000_000n,
+        feeBasisPoints: 50,
+        poolAddr: LedgerAccountKey("pool_addr:TRON:m1"),
+        merchantAvailable: LedgerAccountKey(`merchant_available:${ctx.tenant.id}:m1`),
+        feeRevenue: LedgerAccountKey(`egofi_fee_revenue:${ctx.tenant.id}`),
+      }),
+    );
+
+    // Initial earnings check: unsweptFee should be 5000
+    const initialEarnings = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/api/earnings",
+      headers: adminAuth(),
+    });
+    const initUsdt = (initialEarnings.json().summary as Array<{ asset: string; unsweptFee: string }>).find(
+      (s) => s.asset === "USDT",
+    );
+    expect(initUsdt?.unsweptFee).toBe("5000");
+
+    // Perform first sweep
+    const sweep1 = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/api/earnings/sweep",
+      headers: adminAuth(),
+      payload: { asset: "USDT" },
+    });
+    expect(sweep1.statusCode).toBe(200);
+    expect(sweep1.json().sweptCount).toBe(1);
+    expect(sweep1.json().totalSweptAmount).toBe("5000");
+
+    // Post-sweep earnings check: unsweptFee should now be 0
+    const afterEarnings = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/api/earnings",
+      headers: adminAuth(),
+    });
+    const afterUsdt = (afterEarnings.json().summary as Array<{ asset: string; unsweptFee: string }>).find(
+      (s) => s.asset === "USDT",
+    );
+    expect(afterUsdt?.unsweptFee).toBe("0");
+
+    // Second sweep attempt: should sweep 0 since all accrued fees have been swept
+    const sweep2 = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/api/earnings/sweep",
+      headers: adminAuth(),
+      payload: { asset: "USDT" },
+    });
+    expect(sweep2.statusCode).toBe(200);
+    expect(sweep2.json().sweptCount).toBe(0);
+    expect(sweep2.json().totalSweptAmount).toBe("0");
   });
 });

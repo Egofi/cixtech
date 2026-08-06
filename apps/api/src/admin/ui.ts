@@ -75,7 +75,38 @@ ${UI_KIT_JS}
   }
   function panel(title,inner){return '<div class="panel"><h3>'+esc(title)+'</h3>'+inner+'</div>';}
 
-  var NAV=[['overview','Overview'],['tenants','Tenants'],['ledger','Ledger'],['deposits','Deposits'],['payouts','Payouts'],['webhooks','Webhooks'],['audit','Admin audit'],['errors','Errors']];
+  var NAV=[['overview','Overview'],['earnings','Earnings & Revenue'],['tenants','Tenants'],['ledger','Ledger'],['deposits','Deposits'],['payouts','Payouts'],['webhooks','Webhooks'],['audit','Admin audit'],['errors','Errors']];
+
+  function showWalletVerificationSheet(chain, address, asset){
+    openModal('Verifying on-chain balance…', '<div class="empty">Querying blockchain node RPC for '+esc(chain)+':'+esc(address)+'…</div>');
+    api('/admin/api/wallets/verify-onchain?chain='+encodeURIComponent(chain)+'&address='+encodeURIComponent(address)+'&asset='+encodeURIComponent(asset||'USDT'))
+      .then(function(res){
+        var badgeCls = res.status==='EXACT_MATCH'?'ok':(res.status==='SURPLUS'?'ok':'bad');
+        var badgeLabel = res.status==='EXACT_MATCH'?'EXACT MATCH':(res.status==='SURPLUS'?'ON-CHAIN SURPLUS':'DEFICIT SHORTFALL');
+        if(res.status==='UNAVAILABLE'){badgeCls='warn';badgeLabel='RPC UNAVAILABLE';}
+
+        var body =
+          '<div class="banner '+badgeCls+'">Status: '+esc(badgeLabel)+'</div>'+
+          '<dl class="kv"><dt>Chain / Network</dt><dd>'+esc(res.chain)+'</dd>'+
+          (res.merchantId?'<dt>Merchant Account</dt><dd class="mono">'+esc(res.merchantId)+'</dd>':'')+
+          '<dt>On-Chain Address</dt><dd class="mono"><a href="'+esc(res.explorerUrl)+'" target="_blank" rel="noopener">'+esc(res.address)+' ↗</a></dd>'+
+          '<dt>Asset</dt><dd>'+esc(res.asset)+'</dd></dl>'+
+          '<div class="cards" style="margin-top:16px">'+
+            '<div class="card"><div class="k">Ledger Balance</div><div class="v">'+moneyHtml(res.ledgerBalance,res.asset)+'</div></div>'+
+            '<div class="card"><div class="k">Live On-Chain Balance</div><div class="v">'+moneyHtml(res.onchainBalance,res.asset)+'</div></div>'+
+            '<div class="card"><div class="k">Variance (Delta)</div><div class="v">'+moneyHtml(res.delta,res.asset)+'</div></div>'+
+          '</div>'+
+          (res.error?'<p class="hint bad">Note: '+esc(res.error)+'</p>':'');
+        var foot = '<a class="button primary" href="'+esc(res.explorerUrl)+'" target="_blank" rel="noopener">View on Block Explorer ↗</a><button id="cm-close">Close</button>';
+        openModal('On-Chain Balance Verification', body, foot, function(el){
+          el.querySelector('#cm-close').onclick=closeModal;
+        });
+      }).catch(function(err){
+        openModal('Verification Failed', '<div class="banner bad">'+esc(err.message)+'</div>', '<button id="cm-close">Close</button>', function(el){
+          el.querySelector('#cm-close').onclick=closeModal;
+        });
+      });
+  }
 
   // Decimals come from the server (chain-config is the only source, §16.5). Prime
   // them before any view runs, so no screen can render base units as if they were
@@ -295,12 +326,81 @@ ${UI_KIT_JS}
         '<td class="mono muted" title="'+esc(r.idempotency_key)+'">'+esc(short(r.idempotency_key))+'</td>';
     });
   }
+  views.earnings=function(){
+    api('/admin/api/earnings').then(function(d){
+      var summary = d.summary || [];
+      var totRev = 0n, totGas = 0n, totUnswept = 0n;
+      for(var i=0;i<summary.length;i++){
+        totRev += BigInt(summary[i].feeRevenue || '0');
+        totGas += BigInt(summary[i].gasExpense || '0');
+        totUnswept += BigInt(summary[i].unsweptFee || '0');
+      }
+      var mainAsset = (summary[0] && summary[0].asset) || 'USDT';
+      var cards=[
+        ['Total Platform Fee Revenue', moneyHtml(totRev.toString(), mainAsset)],
+        ['Network Gas Expenses', moneyHtml(totGas.toString(), mainAsset)],
+        ['Net Platform Profit Margin', moneyHtml((totRev - totGas).toString(), mainAsset)],
+        ['Unswept Revenue (in Pool)', moneyHtml(totUnswept.toString(), mainAsset)]
+      ];
+      var cardsH='';for(var j=0;j<cards.length;j++)cardsH+='<div class="card"><div class="k">'+cards[j][0]+'</div><div class="v">'+cards[j][1]+'</div></div>';
+
+      var sumTable = table(['Asset','Gross Fee Revenue','Gas Expense','Net Margin','Unswept Fee Balance'], summary, function(r){
+        return '<td>'+esc(r.asset)+'</td>'+
+               '<td class="num">'+moneyHtml(r.feeRevenue,r.asset)+'</td>'+
+               '<td class="num">'+moneyHtml(r.gasExpense,r.asset)+'</td>'+
+               '<td class="num">'+moneyHtml(r.netMargin,r.asset)+'</td>'+
+               '<td class="num">'+moneyHtml(r.unsweptFee,r.asset)+'</td>';
+      });
+
+      var tenantTable = table(['Tenant Name','Tenant ID','Asset','Fee Revenue Contributed'], d.tenantBreakdown||[], function(r){
+        return '<td>'+esc(r.tenantName)+'</td>'+
+               '<td class="mono" title="'+esc(r.tenantId)+'">'+esc(short(r.tenantId))+'</td>'+
+               '<td class="muted">'+esc(r.asset)+'</td>'+
+               '<td class="num">'+moneyHtml(r.feeRevenue,r.asset)+'</td>';
+      });
+
+      var trendTable = table(['Asset','24 Hours','7 Days','30 Days'], d.trends||[], function(r){
+        return '<td>'+esc(r.asset)+'</td>'+
+               '<td class="num">'+moneyHtml(r.fee24h,r.asset)+'</td>'+
+               '<td class="num">'+moneyHtml(r.fee7d,r.asset)+'</td>'+
+               '<td class="num">'+moneyHtml(r.fee30d,r.asset)+'</td>';
+      });
+
+      main('<div class="head"><h2>Earnings & Revenue Analysis</h2><button class="primary" id="swp">Sweep fees to platform treasury</button></div>'+
+           '<div class="cards">'+cardsH+'</div>'+
+           panel('Financial Margins by Asset', sumTable)+
+           panel('Tenant Revenue Breakdown', tenantTable)+
+           panel('Revenue Growth Trends', trendTable));
+      var swpBtn = document.getElementById('swp');
+      if(swpBtn){
+        swpBtn.onclick = function(){
+          if(!confirm('Sweep all accrued platform fee revenue into the platform treasury?')) return;
+          api('/admin/api/earnings/sweep', { method: 'POST', body: JSON.stringify({ asset: mainAsset }) })
+            .then(function(res){
+              alert('Successfully swept ' + money(res.totalSweptAmount || '0', mainAsset) + ' ' + mainAsset + ' into platform treasury across ' + (res.sweptCount || 0) + ' pool account(s).');
+              views.earnings();
+            }).catch(fail);
+        };
+      }
+    }).catch(fail);
+  };
+
   views.ledger=function(){
     Promise.all([api('/admin/api/ledger/accounts'),api('/admin/api/ledger/entries?limit=50')]).then(function(res){
-      var acc=table(['Account','What it is','Asset','Balance'],res[0],function(r){
-        return '<td>'+accountCell(r.account)+'</td><td>'+badge(ACCOUNT_TYPE_WORDS[r.type]||r.type,'muted')+'</td><td class="muted">'+esc(r.asset)+'</td><td class="num">'+moneyHtml(r.balance,r.asset)+'</td>';
+      var acc=table(['Account','What it is','Asset','Balance','Verification'],res[0],function(r){
+        var parts=r.account.split(':');
+        var isWallet = parts[0]==='pool_addr' || parts[0]==='treasury';
+        var chain = (parts[0]==='pool_addr'?parts[1]:'TRON') || 'TRON';
+        var addr = parts[0]==='pool_addr'?parts[2]:(parts[1]||'');
+        var btn = (isWallet && addr) ? '<button data-vchain="'+esc(chain)+'" data-vaddr="'+esc(addr)+'" data-vasset="'+esc(r.asset)+'">Verify On-Chain</button>' : '—';
+        return '<td>'+accountCell(r.account)+'</td><td>'+badge(ACCOUNT_TYPE_WORDS[r.type]||r.type,'muted')+'</td><td class="muted">'+esc(r.asset)+'</td><td class="num">'+moneyHtml(r.balance,r.asset)+'</td><td>'+btn+'</td>';
       });
       main('<div class="head"><h2>Ledger</h2></div>'+panel('Balances',acc)+panel('Recent activity',entriesTable(res[1])));
+      document.querySelectorAll('[data-vaddr]').forEach(function(b){
+        b.onclick=function(){
+          showWalletVerificationSheet(b.getAttribute('data-vchain'), b.getAttribute('data-vaddr'), b.getAttribute('data-vasset'));
+        };
+      });
     }).catch(fail);
   };
   views.deposits=function(){api('/admin/api/deposits?limit=80').then(function(rows){main('<div class="head"><h2>Deposits</h2></div>'+panel('Money in',entriesTable(rows)));}).catch(fail);};

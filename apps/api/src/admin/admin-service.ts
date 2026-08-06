@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { assetRegistry } from "@cixtech/chain-config";
-import { SqlKillSwitch } from "@cixtech/chains";
-import { accountTypeOf, normalBalance } from "@cixtech/ledger";
+import { FeeSweepService, SqlKillSwitch } from "@cixtech/chains";
+import { accountTypeOf, feeSwept, LedgerService, normalBalance, SqlLedgerStore } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
-import { AccountType, type LedgerAccountKey } from "@cixtech/types";
+import { AccountType, Asset, IdempotencyKey, type JournalEntryId, LedgerAccountKey } from "@cixtech/types";
 import type { Engine } from "../engine.js";
 
 export interface AuditEntry {
@@ -155,6 +155,215 @@ export class AdminService {
       type: accountTypeOf(r.account as LedgerAccountKey),
       balance: normalBalance(r.account as LedgerAccountKey, BigInt(r.amount)).toString(),
     }));
+  }
+
+  /**
+   * Platform earnings analysis: fee revenue, network gas costs, net margins,
+   * tenant breakdown, and recent revenue trends across 24h / 7d / 30d.
+   */
+  async earningsAnalysis() {
+    const { rows: balances } = await this.sql.query<{
+      account: string;
+      asset: string;
+      amount: string;
+    }>("SELECT account, asset, amount FROM balance");
+
+    // Aggregate by asset: platform fee revenue vs network gas expense
+    const byAsset = new Map<
+      string,
+      { feeRevenue: bigint; gasExpense: bigint; unsweptFee: bigint }
+    >();
+
+    for (const r of balances) {
+      const key = r.account as LedgerAccountKey;
+      const type = accountTypeOf(key);
+      const mag = normalBalance(key, BigInt(r.amount));
+      const slot = byAsset.get(r.asset) ?? { feeRevenue: 0n, gasExpense: 0n, unsweptFee: 0n };
+
+      if (r.account.startsWith("egofi_fee_revenue:")) {
+        slot.feeRevenue += mag;
+        slot.unsweptFee += mag; // Accrued fee revenue sitting across pool/merchant accounts
+      } else if (r.account.startsWith("treasury:")) {
+        slot.unsweptFee -= mag;
+      } else if (r.account.endsWith("_expense")) {
+        slot.gasExpense += mag;
+      }
+      byAsset.set(r.asset, slot);
+    }
+
+    const assetsSummary = [...byAsset.entries()]
+      .map(([asset, v]) => {
+        const netMargin = v.feeRevenue - v.gasExpense;
+        const unswept = v.unsweptFee < 0n ? 0n : v.unsweptFee;
+        return {
+          asset,
+          feeRevenue: v.feeRevenue.toString(),
+          gasExpense: v.gasExpense.toString(),
+          netMargin: netMargin.toString(),
+          unsweptFee: unswept.toString(),
+        };
+      })
+      .sort((a, b) => a.asset.localeCompare(b.asset));
+
+    // Breakdown per tenant
+    const { rows: tenantFees } = await this.sql.query<{
+      account: string;
+      asset: string;
+      amount: string;
+    }>("SELECT account, asset, amount FROM balance WHERE account LIKE 'egofi_fee_revenue:%'");
+
+    const { rows: tenants } = await this.sql.query<{ id: string; name: string }>(
+      "SELECT id, name FROM tenant",
+    );
+    const tenantNameMap = new Map(tenants.map((t) => [t.id, t.name]));
+
+    const tenantBreakdown = tenantFees.map((r) => {
+      const tenantId = r.account.split(":")[1] ?? "";
+      const mag = normalBalance(r.account as LedgerAccountKey, BigInt(r.amount));
+      return {
+        tenantId,
+        tenantName: tenantNameMap.get(tenantId) ?? "Unknown Tenant",
+        asset: r.asset,
+        feeRevenue: mag.toString(),
+      };
+    });
+
+    // Recent revenue trends: 24h, 7d, 30d
+    const { rows: trendRows } = await this.sql.query<{
+      asset: string;
+      fee24h: string;
+      fee7d: string;
+      fee30d: string;
+    }>(
+      `SELECT p.asset,
+              COALESCE(SUM(CASE WHEN je.occurred_at >= now() - interval '24 hours' THEN p.amount ELSE 0 END), 0)::text AS fee24h,
+              COALESCE(SUM(CASE WHEN je.occurred_at >= now() - interval '7 days' THEN p.amount ELSE 0 END), 0)::text AS fee7d,
+              COALESCE(SUM(CASE WHEN je.occurred_at >= now() - interval '30 days' THEN p.amount ELSE 0 END), 0)::text AS fee30d
+         FROM posting p
+         JOIN journal_entry je ON p.journal_entry_id = je.id
+        WHERE p.account LIKE 'egofi_fee_revenue:%' AND p.direction = 'CREDIT'
+        GROUP BY p.asset`,
+    );
+
+    return {
+      summary: assetsSummary,
+      tenantBreakdown,
+      trends: trendRows,
+    };
+  }
+
+  /**
+   * Sweep accrued platform fee revenue from deposit pool addresses into platform treasury.
+   */
+  async sweepFees(asset = "USDT") {
+    const service = new FeeSweepService(this.sql);
+    return service.sweep(asset);
+  }
+
+  /**
+   * One-click live on-chain balance verification for any wallet address or merchant pool:
+   * Compares internal double-entry ledger balance against live RPC on-chain balance.
+   */
+  async verifyOnchainWallet(chain: string, target: string, asset = "USDT") {
+    const cleanChain = chain.toUpperCase();
+
+    // Clean target (e.g. pool_addr:TRON:merchantId -> merchantId)
+    let cleanTarget = target.trim();
+    if (cleanTarget.includes(":")) {
+      const parts = cleanTarget.split(":");
+      cleanTarget = parts[parts.length - 1] ?? cleanTarget;
+    }
+
+    // Determine if cleanTarget is an on-chain address or a merchant/tenant ID
+    const isDirectTron =
+      cleanChain === "TRON" && cleanTarget.startsWith("T") && cleanTarget.length >= 33;
+    const isDirectEvm = cleanTarget.startsWith("0x") && cleanTarget.length === 42;
+    const isDirectAddress = isDirectTron || isDirectEvm;
+
+    let targetAddresses: string[] = [];
+    let merchantId: string | null = null;
+
+    if (isDirectAddress) {
+      targetAddresses = [cleanTarget];
+    } else {
+      merchantId = cleanTarget;
+      // Resolve assigned blockchain addresses for this merchant/tenant from pool_address table
+      const { rows: poolRows } = await this.sql.query<{ address: string }>(
+        "SELECT address FROM pool_address WHERE (merchant = $1 OR tenant = $1) AND chain = $2",
+        [merchantId, cleanChain],
+      );
+      targetAddresses = poolRows.map((r) => r.address);
+    }
+
+    // 1. Query ledger balance for the merchant or direct address
+    const poolKey = merchantId
+      ? `pool_addr:${cleanChain}:${merchantId}`
+      : `pool_addr:${cleanChain}:${cleanTarget}`;
+    const { rows: balRows } = await this.sql.query<{ amount: string }>(
+      "SELECT amount FROM balance WHERE (account = $1 OR account LIKE '%' || $2) AND asset = $3",
+      [poolKey, cleanTarget, asset],
+    );
+
+    const ledgerBalance = balRows[0]?.amount ?? "0";
+    const ledgerBig = BigInt(ledgerBalance);
+
+    // 2. Fetch live on-chain balance(s) using chain router
+    let totalOnchainBig = 0n;
+    let error: string | null = null;
+
+    if (targetAddresses.length === 0) {
+      error = isDirectAddress
+        ? null
+        : `No deposit addresses provisioned in pool for merchant ${cleanTarget} on ${cleanChain}.`;
+    } else {
+      try {
+        const balanceProvider = this.engine.chains.get(cleanChain).balances;
+        for (const addr of targetAddresses) {
+          const b = await balanceProvider.balance(cleanChain, addr, asset);
+          totalOnchainBig += b;
+        }
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    const deltaBig = totalOnchainBig - ledgerBig;
+
+    let status: "EXACT_MATCH" | "SURPLUS" | "DEFICIT" | "UNAVAILABLE" = "EXACT_MATCH";
+    if (error) {
+      status = "UNAVAILABLE";
+    } else if (deltaBig > 0n) {
+      status = "SURPLUS";
+    } else if (deltaBig < 0n) {
+      status = "DEFICIT";
+    }
+
+    const primaryAddress = targetAddresses[0] || cleanTarget;
+
+    // 3. Explorer URL mapping
+    const explorerMap: Record<string, string> = {
+      TRON: `https://nile.tronscan.org/#/address/${primaryAddress}`,
+      BASE: `https://basescan.org/address/${primaryAddress}`,
+      ARBITRUM: `https://arbiscan.io/address/${primaryAddress}`,
+      POLYGON: `https://polygonscan.com/address/${primaryAddress}`,
+      BSC: `https://bscscan.com/address/${primaryAddress}`,
+      ETHEREUM: `https://etherscan.io/address/${primaryAddress}`,
+    };
+    const explorerUrl = explorerMap[cleanChain] ?? `https://blockscan.com/address/${primaryAddress}`;
+
+    return {
+      chain: cleanChain,
+      address: primaryAddress,
+      targetAddresses,
+      merchantId,
+      asset,
+      ledgerBalance,
+      onchainBalance: totalOnchainBig.toString(),
+      delta: deltaBig.toString(),
+      status,
+      explorerUrl,
+      error,
+    };
   }
 
   /** Journal entries with their postings; filter by account and/or kind prefix. */

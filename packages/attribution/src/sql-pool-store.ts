@@ -115,7 +115,7 @@ export class SqlPoolStore implements PoolStore {
 
   async activeAddresses(chain: string): Promise<PoolAddressRow[]> {
     const r = await this.sql.query<Row>(
-      `SELECT ${COLS} FROM pool_address WHERE chain = $1 AND state IN ('RESERVED', 'IN_USE')`,
+      `SELECT ${COLS} FROM pool_address WHERE chain = $1 AND state IN ('RESERVED', 'IN_USE', 'COOLING')`,
       [chain],
     );
     return r.rows.map(toRow);

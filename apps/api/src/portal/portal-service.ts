@@ -70,36 +70,109 @@ export class PortalService {
       occurredAt: string;
       asset: string;
       amount: string;
+      grossAmount: string;
+      feeCollected: string;
+      feeBps: number;
+      feePercent: string;
+      netCredited: string;
       accountId: string | null;
     }>
   > {
-    const { rows } = await this.sql.query<{
+    const { rows: entries } = await this.sql.query<{
       id: string;
       kind: string;
       occurred_at: string;
-      account: string;
-      asset: string;
-      amount: string;
     }>(
-      `SELECT je.id, je.kind, je.occurred_at, p.account, p.asset, p.amount::text AS amount
+      `SELECT je.id, je.kind, je.occurred_at
          FROM journal_entry je
-         JOIN posting p ON p.journal_entry_id = je.id
         WHERE (je.kind LIKE 'deposit%' OR je.kind LIKE 'reverse%')
-          AND (p.account LIKE 'merchant_available:' || $1 || ':%'
-               OR p.account LIKE 'compliance_suspense:' || $1 || '%')
+          AND je.id IN (
+            SELECT p.journal_entry_id FROM posting p
+            WHERE p.account LIKE 'merchant_available:' || $1 || ':%'
+               OR p.account LIKE 'compliance_suspense:' || $1 || '%'
+          )
         ORDER BY je.occurred_at DESC LIMIT $2`,
       [tenantId, limit],
     );
-    return rows.map((r) => ({
-      id: r.id,
-      kind: r.kind,
-      occurredAt: new Date(r.occurred_at).toISOString(),
-      asset: r.asset,
-      amount: r.amount,
-      accountId: r.account.startsWith("merchant_available:")
-        ? (r.account.split(":")[2] ?? null)
-        : null,
-    }));
+
+    if (entries.length === 0) return [];
+
+    const ids = entries.map((e) => e.id);
+    const { rows: postings } = await this.sql.query<{
+      journal_entry_id: string;
+      account: string;
+      asset: string;
+      amount: string;
+      direction: string;
+    }>(
+      `SELECT journal_entry_id, account, asset, amount::text AS amount, direction
+         FROM posting
+        WHERE journal_entry_id = ANY($1)
+        ORDER BY id`,
+      [ids],
+    );
+
+    const postingsByEntry = new Map<string, typeof postings>();
+    for (const p of postings) {
+      const list = postingsByEntry.get(p.journal_entry_id) ?? [];
+      list.push(p);
+      postingsByEntry.set(p.journal_entry_id, list);
+    }
+
+    return entries.map((je) => {
+      const list = postingsByEntry.get(je.id) ?? [];
+      let asset = "";
+      let accountId: string | null = null;
+      let grossAmountBig = 0n;
+      let feeCollectedBig = 0n;
+      let netCreditedBig = 0n;
+
+      for (const p of list) {
+        if (!asset) asset = p.asset;
+        const amt = BigInt(p.amount);
+
+        if (p.account.startsWith("merchant_available:")) {
+          accountId = p.account.split(":")[2] ?? null;
+          netCreditedBig = amt;
+        } else if (p.account.startsWith("egofi_fee_revenue:")) {
+          feeCollectedBig = amt;
+        } else if (p.account.startsWith("pool_addr:")) {
+          grossAmountBig = amt;
+        } else if (p.account.startsWith("compliance_suspense:")) {
+          if (grossAmountBig === 0n) grossAmountBig = amt;
+        }
+      }
+
+      if (grossAmountBig === 0n) {
+        grossAmountBig = netCreditedBig + feeCollectedBig;
+      }
+
+      let feeBps = 0;
+      let feePercent = "0%";
+      if (grossAmountBig > 0n && feeCollectedBig > 0n) {
+        feeBps = Math.round(Number((feeCollectedBig * 10000n) / grossAmountBig));
+        const pct = (Number(feeCollectedBig) / Number(grossAmountBig)) * 100;
+        feePercent = `${parseFloat(pct.toFixed(4))}%`;
+      }
+
+      const grossStr = grossAmountBig.toString();
+      const feeStr = feeCollectedBig.toString();
+      const netStr = netCreditedBig.toString();
+
+      return {
+        id: je.id,
+        kind: je.kind,
+        occurredAt: new Date(je.occurred_at).toISOString(),
+        asset,
+        amount: je.kind === "deposit.quarantined" ? grossStr : netStr,
+        grossAmount: grossStr,
+        feeCollected: feeStr,
+        feeBps,
+        feePercent,
+        netCredited: netStr,
+        accountId,
+      };
+    });
   }
 
   /** Payout history from the durable intent journal — live status, tx id, destination. */

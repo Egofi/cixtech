@@ -22,7 +22,7 @@ services:
     container_name: cixtech-redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-6380}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -55,7 +55,7 @@ services:
       # and opting out of it for a custody database has to be explicit.
       CIXTECH_DB_SSL: ${CIXTECH_DB_SSL:-disable}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      CIXTECH_ENGINE_XPRV: ${CIXTECH_ENGINE_XPRV:-xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wDELg83Jh7zAGbBUzyoWwqB2255v2222222222222222222222222222222222222222222}
+      CIXTECH_ENGINE_XPRV: ${CIXTECH_ENGINE_XPRV:-xprv9xwqBRQ6vATr5D93zLEaXHbyJXbQcn5mYy5BcBpqpcFWmZLTdqmzUTq4wnDcGYRKMFKVo4fqo6mbTP8MyyJzNUMi8LsvJRy4vARF9Z1KJNt}
       CIXTECH_ADMIN_TOKEN: ${CIXTECH_ADMIN_TOKEN:-dev-admin-token-secret}
       CIXTECH_MAX_PAYOUT: ${CIXTECH_MAX_PAYOUT:-1000000000}
       CIXTECH_VELOCITY_WINDOW_MS: ${CIXTECH_VELOCITY_WINDOW_MS:-86400000}

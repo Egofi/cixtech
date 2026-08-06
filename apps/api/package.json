@@ -11,9 +11,12 @@
     "db:migrate": "node migrate.mjs"
   },
   "dependencies": {
+    "@cixtech/accounting": "workspace:*",
+    "@cixtech/ai": "workspace:*",
     "@cixtech/attribution": "workspace:*",
     "@cixtech/chain-config": "workspace:*",
     "@cixtech/chains": "workspace:*",
+    "@cixtech/checkout": "workspace:*",
     "@cixtech/errors": "workspace:*",
     "@cixtech/ledger": "workspace:*",
     "@cixtech/signing": "workspace:*",

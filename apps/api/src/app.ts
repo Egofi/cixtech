@@ -11,9 +11,13 @@ import Fastify, {
   type FastifyRequest,
   type FastifyServerOptions,
 } from "fastify";
+import { registerAccounting } from "./accounting/accounting-routes.js";
+import { registerAi } from "./ai/ai-routes.js";
+import { registerPosAndPor } from "./pos/pos-routes.js";
 import { registerAdmin } from "./admin/admin-routes.js";
 import { AdminService } from "./admin/admin-service.js";
 import { SqlErrorSink } from "./admin/sql-error-sink.js";
+import { registerCheckout } from "./checkout/checkout-routes.js";
 import type { Engine } from "./engine.js";
 import { installMetrics } from "./metrics.js";
 import { registerPortal } from "./portal/portal-routes.js";
@@ -80,7 +84,10 @@ const isPublic = (url: string): boolean =>
   url === "/metrics" ||
   url.startsWith("/docs") ||
   url.startsWith("/admin") ||
-  url.startsWith("/portal");
+  url.startsWith("/portal") ||
+  url.startsWith("/checkout") ||
+  url.startsWith("/v1/checkout/intents/") ||
+  url.startsWith("/v1/checkout/recovery");
 
 export interface AdminPlaneOptions {
   /** Super-admin bearer token. When unset, the admin plane is disabled. */
@@ -167,6 +174,26 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
         {
           name: "payouts",
           description: "Money-out: allow-list management and policy-guarded withdrawals",
+        },
+        {
+          name: "checkout",
+          description: "Smart checkout, 15-minute price locks, payment intents & stranded deposit recovery",
+        },
+        {
+          name: "accounting",
+          description: "GAAP/IFRS trial balance GL exports (QuickBooks, Xero, MT940), ERP sync & customer refunds",
+        },
+        {
+          name: "ai",
+          description: "Natural language financial sub-ledger query engine, risk anomaly feed & autonomous agentic rules",
+        },
+        {
+          name: "pos",
+          description: "Point-of-Sale terminal dynamic QR generator & thermal receipt printing",
+        },
+        {
+          name: "proof-of-reserves",
+          description: "Real-time cryptographic proof of 1:1 solvency backing & Merkle root verification",
         },
         {
           name: "webhooks",
@@ -507,6 +534,18 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   // Tenant portal (dashboard) — static SPA shell; its data calls hit /v1 with the
   // tenant API key, so the shell itself needs no server-side auth.
   registerPortal(app);
+
+  // Phase 2 Checkout & FX Payment Intent routes
+  registerCheckout(app, { engine });
+
+  // Phase 3 Accounting, ERP Sync & Automated Refund routes
+  registerAccounting(app, { engine });
+
+  // Phase 4 Autonomous AI Agent Financial Ops & Anomaly Detection routes
+  registerAi(app, { engine });
+
+  // Proof of Reserves & POS Terminal routes
+  registerPosAndPor(app, { engine });
 
   await app.ready();
   return app;

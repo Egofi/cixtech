@@ -10,6 +10,9 @@ import type { SqlClient } from "@cixtech/ledger";
 import type { MigratableSqlClient } from "@cixtech/postgres";
 import { ADMIN_SCHEMA_SQL } from "./admin/admin-schema.js";
 import { API_SCHEMA_SQL } from "./api-schema.js";
+import { ACCOUNTING_SCHEMA_SQL } from "./accounting/accounting-schema.js";
+import { AI_SCHEMA_SQL } from "./ai/ai-schema.js";
+import { CHECKOUT_SCHEMA_SQL } from "./checkout/checkout-schema.js";
 import { CURSOR_SCHEMA_SQL } from "./chains/deposit-cursor.js";
 import { RLS_SCHEMA_SQL, assertTenantTablesProtected } from "./rls.js";
 
@@ -44,6 +47,9 @@ export const SCHEMA_MODULES: readonly SchemaModule[] = [
   { name: "api", sql: API_SCHEMA_SQL },
   { name: "admin", sql: ADMIN_SCHEMA_SQL },
   { name: "deposit-cursor", sql: CURSOR_SCHEMA_SQL },
+  { name: "checkout", sql: CHECKOUT_SCHEMA_SQL },
+  { name: "accounting", sql: ACCOUNTING_SCHEMA_SQL },
+  { name: "ai", sql: AI_SCHEMA_SQL },
   { name: "rls", sql: RLS_SCHEMA_SQL },
 ];
 

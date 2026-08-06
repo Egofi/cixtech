@@ -77,10 +77,20 @@ describe("tenant portal + activity APIs", () => {
     const bal = await app.inject({ method: "GET", url: "/v1/balances", headers: auth(apiKey) });
     expect(bal.json().balances).toMatchObject([{ accountId, asset: "USDT", available: "9950000" }]);
 
-    // Deposit history shows the credit with the net amount.
+    // Deposit history shows the credit with fee breakdown (fee collected, percentage, gross, net).
     const deps = await app.inject({ method: "GET", url: "/v1/deposits", headers: auth(apiKey) });
     expect(deps.json().deposits).toMatchObject([
-      { kind: "deposit.finalized", asset: "USDT", amount: "9950000", accountId },
+      {
+        kind: "deposit.finalized",
+        asset: "USDT",
+        amount: "9950000",
+        grossAmount: "10000000",
+        feeCollected: "50000",
+        feeBps: 50,
+        feePercent: "0.5%",
+        netCredited: "9950000",
+        accountId,
+      },
     ]);
 
     // Allow-list DEST (static-set already allows it; the durable row records cool-down).

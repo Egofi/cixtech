@@ -153,29 +153,41 @@ async function main(): Promise<void> {
   app.log.info({ chains, database: db.describe }, "cixtech engine listening");
 
   // Detection loop: poll every configured chain (failures isolated per chain).
-  setInterval(() => {
+  const runDetection = () => {
     void engine.watcher.pollAll(chains).then((r) => {
       for (const f of r.failures) console.error("detection poll failed", f);
     });
-  }, DETECTION_INTERVAL_MS);
+  };
+  runDetection();
+  setInterval(runDetection, DETECTION_INTERVAL_MS);
 
-  // Webhook dispatch loop: drain the outbox with retries + dead-lettering.
-  setInterval(() => {
-    void engine.webhookDispatcher
-      .dispatchDue()
-      .catch((err) => console.error("webhook dispatch failed", err));
-  }, WEBHOOK_DISPATCH_INTERVAL_MS);
+  // Webhook dispatch and pool release are handled by the BullMQ worker process
+  // (apps/worker) when REDIS_URL is configured. The API falls back to its own
+  // setInterval loops when REDIS_URL is absent — backwards compatible with
+  // single-process deployments and test harnesses that never start Redis.
+  const workerHandles = Boolean(env["REDIS_URL"]);
 
-  // Pool cool-off sweeper (ADR 0009): COOLING → AVAILABLE once the window closes,
-  // so addresses are reused and the pool stays bounded.
-  setInterval(() => {
-    void engine
-      .releaseCooledAddresses()
-      .then((n) => {
-        if (n > 0) app.log.info({ released: n }, "pool addresses returned to AVAILABLE");
-      })
-      .catch((err) => console.error("pool release failed", err));
-  }, POOL_RELEASE_INTERVAL_MS);
+  if (workerHandles) {
+    app.log.info("REDIS_URL set — webhook dispatch and pool release delegated to worker process");
+  } else {
+    // Webhook dispatch loop: drain the outbox with retries + dead-lettering.
+    setInterval(() => {
+      void engine.webhookDispatcher
+        .dispatchDue()
+        .catch((err) => console.error("webhook dispatch failed", err));
+    }, WEBHOOK_DISPATCH_INTERVAL_MS);
+
+    // Pool cool-off sweeper (ADR 0009): COOLING → AVAILABLE once the window closes,
+    // so addresses are reused and the pool stays bounded.
+    setInterval(() => {
+      void engine
+        .releaseCooledAddresses()
+        .then((n) => {
+          if (n > 0) app.log.info({ released: n }, "pool addresses returned to AVAILABLE");
+        })
+        .catch((err) => console.error("pool release failed", err));
+    }, POOL_RELEASE_INTERVAL_MS);
+  }
 }
 
 main().catch((err) => {

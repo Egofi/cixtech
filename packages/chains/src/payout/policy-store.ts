@@ -75,6 +75,10 @@ export class SqlKillSwitch implements KillSwitch {
     );
   }
 
+  async trip(reason: string): Promise<void> {
+    return this.engage(reason);
+  }
+
   async reset(): Promise<void> {
     await this.sql.query(
       `INSERT INTO policy_kill_switch (scope, engaged, reason, updated_at)

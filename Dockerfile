@@ -11,9 +11,13 @@ RUN apk add --no-cache bash curl && \
 # Copy package manifests and workspace configuration
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc turbo.json tsconfig.base.json ./
 COPY apps/api/package.json ./apps/api/
+COPY apps/worker/package.json ./apps/worker/
+COPY packages/accounting/package.json ./packages/accounting/
+COPY packages/ai/package.json ./packages/ai/
 COPY packages/attribution/package.json ./packages/attribution/
 COPY packages/chain-config/package.json ./packages/chain-config/
 COPY packages/chains/package.json ./packages/chains/
+COPY packages/checkout/package.json ./packages/checkout/
 COPY packages/errors/package.json ./packages/errors/
 COPY packages/ledger/package.json ./packages/ledger/
 COPY packages/mpc/package.json ./packages/mpc/
@@ -31,7 +35,8 @@ COPY packages/types/package.json ./packages/types/
 # "@noble/curves/secp256k1" subpath export, so a build that hoists v2 fails
 # typecheck while the previous one passed. The lockfile pins signing to 1.9.7;
 # honour it, and let a genuinely stale lockfile fail the build loudly.
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 # Copy all source files and tooling
 COPY apps ./apps

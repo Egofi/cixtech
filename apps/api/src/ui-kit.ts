@@ -188,7 +188,7 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 .status-dot{width:6px;height:6px;border-radius:var(--r-pill);background:currentColor;animation:pulseDot 2s infinite ease-in-out}
 .top-search{position:relative;width:240px}
 .top-search input{width:100%;padding-left:32px;font-size:13px;height:34px}
-.theme-toggle{width:36px;padding:0;font-size:15px}
+.theme-toggle{width:32px;height:32px;padding:0;font-size:14px;flex:none}
 
 /* ── Timeframe filter & timezone chip ────────────────────────────────────── */
 .timeframe-group{display:inline-flex;gap:2px;background:rgb(var(--navy-50));padding:3px;border:1px solid var(--line)}
@@ -238,22 +238,38 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 .side .spacer{flex:1}
 .side button{background:rgba(255,255,255,0.07);border-color:rgba(255,255,255,0.14);color:rgba(226,235,247,0.9);box-shadow:none}
 .side button:hover{background:rgba(255,255,255,0.13);border-color:rgba(255,255,255,0.22);color:#fff}
-.side-foot{border-top:1px solid rgba(255,255,255,0.08);padding-top:14px;margin-top:12px;
-  display:flex;flex-direction:column;gap:8px}
+.side-foot{border-top:1px solid rgba(255,255,255,0.08);padding-top:12px;margin-top:12px;
+  display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.side-foot .spacer{flex:1;min-width:0}
 .side-foot-item{display:flex;align-items:center;gap:6px;font-size:11.5px;color:rgba(226,235,247,0.6)}
 .side-foot-item .dot{width:6px;height:6px;border-radius:var(--r-pill)}
 .side-foot-item .dot.blue{background:#38BDF8}
 .side-foot-item .dot.green{background:rgb(var(--success))}
-.env-pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:4px 12px;
-  border-radius:var(--r-pill);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-top:4px;
+.env-pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:3px 10px;
+  border-radius:var(--r-pill);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;
   background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.4);color:rgb(var(--success))}
 .env-pill.testnet{background:rgba(245,158,11,0.12);border-color:rgba(245,158,11,0.45);color:#FBBF24}
 
-.main{padding:0 0 60px;overflow:auto;min-width:0}
-#content-body,.main>.head{padding-left:34px;padding-right:34px}
-.main>.head{padding-top:4px}
-.head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px;flex-wrap:wrap;
-  animation:fadeIn .4s cubic-bezier(0.22,1,0.36,1) both}
+/* The gutter lives on the scroll container, not on one named child: the admin
+   console writes screens straight into \`.main\` while the portal wraps them in
+   \`#content-body\`, and hanging the padding off the wrapper left admin's cards
+   running under the sidebar and off the right edge. \`.topbar\` opts back out
+   because it is a full-bleed sticky bar. */
+/* The gutter lives on the scroll container, so every screen gets it whichever
+   way its console renders: the admin console writes straight into \`.main\`, the
+   portal wraps its screens in \`#content-body\`. Hanging it off the wrapper left
+   admin's cards flush against the sidebar and clipped off the right edge, and
+   padding the children instead only insets their text — a panel or banner has a
+   background, so its box would still have run edge to edge.
+   The sticky topbar cancels the gutter back out, since it is full-bleed. */
+.main{padding:0 34px 60px;overflow:auto;min-width:0}
+.main>.topbar{margin-left:-34px;margin-right:-34px}
+#content-body{padding:0}
+/* Long lines are unreadable on an ultrawide, so content stops widening before
+   the window does. */
+.main>*:not(.topbar),#content-body>*{max-width:1560px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  margin:6px 0 24px;flex-wrap:wrap;animation:fadeIn .4s cubic-bezier(0.22,1,0.36,1) both}
 .head h2{margin:0;font-size:1.75rem;line-height:2.125rem;letter-spacing:-.02em;font-weight:700}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 
@@ -341,6 +357,44 @@ td.mono,.mono{font-family:var(--mono);font-size:12px}
 .movement .dir{color:var(--muted);font-size:11px;min-width:32px;text-transform:uppercase;
   letter-spacing:.4px;font-weight:600}
 .movement .amt{min-width:118px;text-align:right}
+
+/* ── Journal entries ─────────────────────────────────────────────────────── */
+/* A journal entry is ONE event with several postings, and it used to render as
+   several free-floating lines whose amounts, directions and account names never
+   lined up — three columns of drift per row. Everything now sits on one grid,
+   so amounts share a right edge and account names share a left one no matter
+   how many postings an entry carries. */
+/* The event column sizes to its content so the postings take the slack, instead
+   of the old four-column split where the two narrow columns took it. */
+.col-event{width:1%;white-space:nowrap;vertical-align:top;padding-top:16px}
+.entry-what{display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+.entry-meta{display:flex;align-items:center;gap:7px;flex-wrap:nowrap;color:var(--faint);font-size:11.5px}
+.entry-meta .ref{font-family:var(--mono);font-size:11px}
+.entry-meta .sep{opacity:.5}
+
+.flow{display:grid;grid-template-columns:minmax(96px,auto) auto minmax(0,1fr);
+  gap:2px 14px;align-items:baseline}
+.flow-amt{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* The direction chip is what tells a reader which way value moved; as 11px grey
+   caps it was the least visible thing in the row despite being the point. */
+.flow-dir{justify-self:start;font-size:10.5px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.5px;padding:1px 7px;border-radius:var(--r-pill);border:1px solid transparent;white-space:nowrap}
+.flow-dir.in{color:var(--ok);background:var(--ok-bg);border-color:color-mix(in srgb,rgb(var(--success)) 30%,transparent)}
+.flow-dir.out{color:var(--warn);background:var(--warn-bg);border-color:color-mix(in srgb,rgb(var(--warning)) 30%,transparent)}
+/* \`display:contents\` dissolves the row wrapper so its three spans become grid
+   items of \`.flow\` itself — that is what keeps every posting on the same three
+   columns without a subgrid. */
+.flow-row{display:contents}
+.flow-row.lead>*{padding-bottom:7px}
+.flow-row.lead .flow-amt{font-size:15px;font-weight:600;color:rgb(var(--navy-950))}
+.flow-row.lead .acct .name{font-weight:600}
+/* The lead posting is the event's headline; the rest are the split it was
+   broken into. The hairline runs across all three columns, so the grouping is
+   structural rather than something the reader has to infer. */
+.flow-row.split-start>*{border-top:1px dashed var(--line2);padding-top:8px}
+.flow-row.split>*{padding-block:2px}
+.flow-row.split .flow-amt{font-size:13px;color:var(--fg2)}
+.flow-row.split .acct .name{color:var(--fg2);font-weight:400}
 
 /* ── Forms ───────────────────────────────────────────────────────────────── */
 .form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;padding:16px 20px}
@@ -487,11 +541,67 @@ function renderStatGrid(cards){
     h += '<div class="nexis-card '+color+'">'+
       '<div class="nexis-card-head"><div class="icon-box">'+icon+'</div><span>'+esc(title)+'</span></div>'+
       '<div class="nexis-card-val">'+(typeof val==='string'&&val.indexOf('<')!==-1?val:esc(String(val)))+'</div>'+
-      (sub?'<div class="nexis-sub-desc" style="margin-top:4px;font-weight:600;color:var(--'+(color==='bad'?'bad':color)+')">'+(typeof sub==='string'&&sub.indexOf('<')!==-1?sub:esc(String(sub)))+'</div>':'')+
+      // The caption stays muted. It was tinted to match the card's hue, which
+      // put four different colours of small text on one row and made the least
+      // important line the loudest — the hue already lives on the rule and icon.
+      (sub?'<div class="nexis-sub-desc">'+(typeof sub==='string'&&sub.indexOf('<')!==-1?sub:esc(String(sub)))+'</div>':'')+
     '</div>';
   }
   h += '</div>';
   return h;
+}
+
+/**
+ * One journal entry's postings, laid on a single three-column grid.
+ *
+ * The debit — where value landed — leads, and the credits it was split into sit
+ * beneath a hairline. Every posting is still shown with its own direction and
+ * amount; this only groups them, because a deposit that credits a merchant and
+ * a fee account is one event, not three unrelated lines.
+ *
+ * An entry with no debit (or only one posting) degrades to a flat list rather
+ * than inventing a headline.
+ */
+function renderFlow(postings){
+  var list=postings||[];
+  var lead=-1;
+  for(var i=0;i<list.length;i++){ if(list[i].direction==='DEBIT'){lead=i;break;} }
+
+  // "into"/"from" is the ledger's existing plain-language vocabulary for a debit
+  // and a credit — the layout is what was wrong here, not the wording.
+  var cell=function(p,cls){
+    var into=p.direction==='DEBIT';
+    return '<div class="flow-row '+cls+'">'+
+      '<span class="flow-amt amount">'+moneyHtml(p.amount,p.asset)+'</span>'+
+      '<span class="flow-dir '+(into?'in':'out')+'">'+(into?'into':'from')+'</span>'+
+      accountCell(p.account)+'</div>';
+  };
+
+  var h='<div class="flow">';
+  if(lead>=0&&list.length>1){
+    h+=cell(list[lead],'lead');
+    var first=true;
+    for(var j=0;j<list.length;j++){
+      if(j===lead)continue;
+      h+=cell(list[j],'split'+(first?' split-start':''));
+      first=false;
+    }
+  }else{
+    for(var k=0;k<list.length;k++)h+=cell(list[k],k===0?'lead':'split'+(k===1?' split-start':''));
+  }
+  return h+'</div>';
+}
+
+/**
+ * The event column: what happened, then when and against which reference. These
+ * were three separate table columns, which left two of them almost empty and
+ * pushed the reference so far right it read as unrelated to its own row.
+ */
+function renderEventCell(label, cls, when, ref){
+  return '<div class="entry-what"><span class="badge '+cls+'">'+esc(label)+'</span>'+
+    '<div class="entry-meta">'+(when||'')+
+    (ref?'<span class="sep">·</span><span class="ref" title="'+esc(ref)+'">'+esc(short(ref))+'</span>':'')+
+    '</div></div>';
 }
 
 function renderTimeframeSwitcher(active){
@@ -521,10 +631,14 @@ function renderSidebarFooter(){
     ? '<div class="env-pill'+(/test|dev/i.test(ENGINE_ENV)?' testnet':'')+'"><span class="status-dot"></span><span>'+esc(ENGINE_ENV)+'</span></div>'
     : '';
   var dark=currentTheme()==='dark';
+  // One row rather than three stacked blocks: status and environment belong
+  // together (both answer "what am I looking at?"), and the toggle is an action,
+  // so it sits apart on the right.
   return '<div class="side-foot">'+
-    '<button class="theme-toggle" onclick="toggleTheme()" title="Switch to '+(dark?'light':'dark')+' theme" aria-label="Switch to '+(dark?'light':'dark')+' theme">'+(dark?'☀️':'🌙')+'</button>'+
-    '<div class="side-foot-item"><span class="dot blue"></span><span>connected</span></div>'+
+    '<div class="side-foot-item"><span class="dot green"></span><span>connected</span></div>'+
     envPill+
+    '<div class="spacer"></div>'+
+    '<button class="theme-toggle" onclick="toggleTheme()" title="Switch to '+(dark?'light':'dark')+' theme" aria-label="Switch to '+(dark?'light':'dark')+' theme">'+(dark?'☀️':'🌙')+'</button>'+
     '</div>';
 }
 

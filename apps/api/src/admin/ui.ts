@@ -362,20 +362,21 @@ ${UI_KIT_JS}
 
   var ACCOUNT_TYPE_WORDS={ASSET:'Funds we hold',LIABILITY:'Owed to customers',REVENUE:'Our earnings',EXPENSE:'Our costs'};
 
+  /**
+   * The journal feed behind Deposits, Payouts and Ledger.
+   *
+   * Was four columns — what / when / movement / reference — of which two held a
+   * single short value and one held a stack of unaligned lines, so each row was
+   * mostly gap with the reference marooned at the far right. Now it is two: the
+   * event (badge, time and reference together, since they describe one thing)
+   * and the postings on a shared grid.
+   */
   function entriesTable(rows){
-    return table(['What happened','When','Movement','Reference'],rows,function(r){
-      var p='';
-      for(var i=0;i<r.postings.length;i++){
-        var x=r.postings[i];
-        var into=x.direction==='DEBIT';
-        p+='<div class="movement">'+
-           '<span class="dir">'+(into?'into':'from')+'</span>'+
-           '<span class="amt">'+moneyHtml(x.amount,x.asset)+'</span>'+
-           accountCell(x.account)+'</div>';
-      }
-      return '<td>'+badge(kindLabel(r.kind),kindClass(r.kind))+'</td>'+
-        '<td class="muted">'+whenCell(r.occurred_at)+'</td><td>'+p+'</td>'+
-        '<td class="mono muted" title="'+esc(r.idempotency_key)+'">'+esc(short(r.idempotency_key))+'</td>';
+    return table(['Event','Movement'],rows,function(r){
+      return '<td class="col-event">'+
+          renderEventCell(kindLabel(r.kind),kindClass(r.kind),whenCell(r.occurred_at),r.idempotency_key)+
+        '</td>'+
+        '<td>'+renderFlow(r.postings)+'</td>';
     });
   }
 

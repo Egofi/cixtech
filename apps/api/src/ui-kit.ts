@@ -28,28 +28,29 @@ export const UI_KIT_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap');
 
 :root{
-  --bg:#07090e; --panel:rgba(15,21,30,0.85); --panel2:rgba(22,30,44,0.9); --raised:#1b2434;
-  --line:rgba(255,255,255,0.08); --line2:rgba(255,255,255,0.16);
-  --fg:#f8fafc; --fg2:#cbd5e1; --muted:#94a3b8; --faint:#64748b;
-  --ok:#10b981; --ok-bg:rgba(16,185,129,0.15);
-  --warn:#f59e0b; --warn-bg:rgba(245,158,11,0.15);
+  --bg:#0b0e17; --panel:#151828; --panel2:#1a1e30; --raised:#1e2338;
+  --line:rgba(255,255,255,0.09); --line2:rgba(255,255,255,0.18);
+  --fg:#f8fafc; --fg2:#cbd5e1; --muted:#8ca0ba; --faint:#64748b;
+  --cyan:#00e5ff; --purple:#b854fd; --green:#00e676; --orange:#ff9100;
+  --ok:#00e676; --ok-bg:rgba(0,230,118,0.15);
+  --warn:#ff9100; --warn-bg:rgba(255,145,0,0.15);
   --bad:#ef4444; --bad-bg:rgba(239,68,68,0.15);
-  --accent-glow:rgba(45,212,191,0.3);
+  --accent-glow:rgba(0,229,255,0.35);
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
   --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   --display:'Outfit','Inter',sans-serif;
   --r:14px; --r-sm:9px;
-  --shadow:0 12px 40px rgba(0,0,0,0.6),0 2px 10px rgba(0,0,0,0.3);
-  --glass-bg:rgba(15,21,30,0.75);
+  --shadow:0 14px 45px rgba(0,0,0,0.65),0 3px 12px rgba(0,0,0,0.4);
+  --glass-bg:rgba(21,24,40,0.85);
   --glass-border:1px solid rgba(255,255,255,0.1);
 }
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:radial-gradient(ellipse at 50% 0%,#111c2e 0%,#07090e 80%);color:var(--fg);
+body{margin:0;background:radial-gradient(circle at 50% 0%,#171b2d 0%,#0b0e17 80%);color:var(--fg);
   font:14px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 a{color:var(--accent);text-decoration:none;transition:color .15s}
 a:hover{color:var(--accent-hi);text-decoration:none}
-h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em}
 ::selection{background:color-mix(in srgb,var(--accent) 40%,transparent)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 
@@ -60,211 +61,318 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
 /* ── Controls ────────────────────────────────────────────────────────────── */
 button{font:600 13px/1.2 var(--sans);cursor:pointer;border:var(--glass-border);
   background:var(--raised);color:var(--fg);border-radius:var(--r-sm);padding:9.5px 16px;
-  transition:all .2s cubic-bezier(0.16, 1, 0.3, 1);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.15)}
-button:hover{background:#253246;border-color:rgba(255,255,255,0.25);transform:translateY(-1.5px);box-shadow:0 6px 16px rgba(0,0,0,0.3)}
+  transition:all .2s cubic-bezier(0.16, 1, 0.3, 1);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.2)}
+button:hover{background:#282f4a;border-color:rgba(255,255,255,0.28);transform:translateY(-1.5px);box-shadow:0 6px 18px rgba(0,0,0,0.35)}
 button:active{transform:translateY(0)}
 button:disabled{opacity:.5;cursor:not-allowed;transform:none}
 button.primary{background:linear-gradient(135deg,var(--accent),var(--accent-hi));border:none;color:#041119;font-weight:700;box-shadow:0 4px 18px var(--accent-glow)}
 button.primary:hover{box-shadow:0 6px 24px color-mix(in srgb,var(--accent) 55%,transparent);transform:translateY(-1.5px)}
 button.danger{background:transparent;border-color:color-mix(in srgb,var(--bad) 45%,transparent);color:var(--bad)}
 button.danger:hover{background:var(--bad-bg);border-color:var(--bad)}
-input,select,textarea{font:14px var(--sans);background:rgba(7,9,14,0.8);border:var(--glass-border);
+input,select,textarea{font:14px var(--sans);background:rgba(11,14,23,0.85);border:var(--glass-border);
   color:var(--fg);border-radius:var(--r-sm);padding:10.5px 14px;transition:all .18s ease;backdrop-filter:blur(8px)}
-input:hover,select:hover,textarea:hover{border-color:rgba(255,255,255,0.22)}
+input:hover,select:hover,textarea:hover{border-color:rgba(255,255,255,0.25)}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
   box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
 input::placeholder,textarea::placeholder{color:var(--faint)}
 
 /* ── Top Navigation Bar ─────────────────────────────────────────────────── */
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;
-  background:rgba(15,21,30,0.7);backdrop-filter:blur(16px);border-bottom:1px solid var(--line);
+  background:rgba(17,20,34,0.75);backdrop-filter:blur(18px);border-bottom:1px solid var(--line);
   position:sticky;top:0;z-index:40;margin-bottom:24px}
 .topbar-left{display:flex;align-items:center;gap:16px}
-.status-pill{display:flex;align-items:center;gap:8px;padding:5px 12px;background:rgba(16,185,129,0.12);
-  border:1px solid rgba(16,185,129,0.3);border-radius:20px;font-size:12px;font-weight:600;color:#34d399}
-.status-dot{width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 8px #10b981;animation:pulseDot 2s infinite ease-in-out}
+.status-pill{display:flex;align-items:center;gap:8px;padding:5px 12px;background:rgba(0,230,118,0.12);
+  border:1px solid rgba(0,230,118,0.3);border-radius:20px;font-size:12px;font-weight:600;color:#00e676}
+.status-dot{width:7px;height:7px;border-radius:50%;background:#00e676;box-shadow:0 0 8px #00e676;animation:pulseDot 2s infinite ease-in-out}
 .top-search{position:relative;width:240px}
 .top-search input{width:100%;padding-left:32px;font-size:12.5px;height:34px;border-radius:18px;background:rgba(0,0,0,0.4)}
+
+/* ── Timeframe Filters & Badges ────────────────────────────────────────── */
+.timeframe-group{display:inline-flex;gap:6px;background:rgba(21,24,40,0.9);padding:4px;border-radius:10px;border:1px solid var(--line)}
+.tf-btn{padding:6px 14px;font-size:12px;font-weight:600;border-radius:7px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;transition:all .18s ease}
+.tf-btn:hover{color:var(--fg);background:rgba(255,255,255,0.04)}
+.tf-btn.active{background:#1b2138;border-color:var(--cyan);color:#38bdf8;box-shadow:0 0 12px rgba(0,229,255,0.25)}
+.tz-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid var(--line);font-size:12px;color:var(--muted);font-weight:500}
 
 /* ── Sign-in ─────────────────────────────────────────────────────────────── */
 .login{max-width:400px;margin:10vh auto;padding:36px;background:var(--panel);backdrop-filter:blur(16px);
   border:1px solid var(--line2);border-radius:16px;box-shadow:var(--shadow);animation:fadeIn .25s ease-out}
-.login .mark{width:38px;height:38px;border-radius:11px;margin-bottom:18px;
-  background:linear-gradient(135deg,var(--accent),var(--accent-hi));
-  display:flex;align-items:center;justify-content:center;color:#08131f;font-weight:800;font-size:18px;box-shadow:0 4px 16px var(--accent-glow)}
+.login .mark{width:42px;height:42px;border-radius:12px;margin-bottom:18px;
+  background:linear-gradient(135deg,#7c3aed,#00e5ff);
+  display:flex;align-items:center;justify-content:center;color:#ffffff;font-weight:800;font-size:20px;box-shadow:0 4px 20px rgba(0,229,255,0.4)}
 .login h1{font-size:22px;margin:0 0 6px;font-weight:700}
 .login p{color:var(--muted);margin:0 0 22px;font-size:13.5px;line-height:1.55}
 .login input{width:100%;margin-bottom:14px}
 .login button{width:100%;padding:11px}
 .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:10px}
 
-/* ── Shell ───────────────────────────────────────────────────────────────── */
-.shell{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
-.side{background:var(--panel);backdrop-filter:blur(16px);border-right:1px solid var(--line);padding:18px 14px;
-  display:flex;flex-direction:column;gap:3px;position:sticky;top:0;height:100vh;overflow-y:auto}
+/* ── Shell & NEXIS Sidebar Layout ───────────────────────────────────────── */
+.shell{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
+.side{background:#111422;backdrop-filter:blur(16px);border-right:1px solid var(--line);padding:20px 14px;
+  display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh;overflow-y:auto}
 .brand{display:flex;align-items:center;gap:12px;padding:6px 10px 22px}
-.brand .mark{width:32px;height:32px;border-radius:9px;flex:none;
-  background:linear-gradient(135deg,var(--accent),var(--accent-hi));
-  display:flex;align-items:center;justify-content:center;color:#08131f;font-weight:800;font-size:15px;box-shadow:0 4px 14px var(--accent-glow)}
-.brand b{display:block;font-size:15px;font-weight:700;letter-spacing:-.01em;line-height:1.25}
+.brand .mark{width:36px;height:36px;border-radius:10px;flex:none;
+  background:linear-gradient(135deg,#7c3aed,#00e5ff);
+  display:flex;align-items:center;justify-content:center;color:#ffffff;font-weight:800;font-size:17px;box-shadow:0 4px 16px rgba(0,229,255,0.4)}
+.brand b{display:block;font-size:15px;font-weight:800;letter-spacing:-.01em;line-height:1.25;
+  background:linear-gradient(90deg,#00f2fe,#b854fd);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .brand small{display:block;color:var(--muted);font-weight:500;font-size:11px;line-height:1.3}
-.nav{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:var(--r-sm);
+
+.nav-group-title{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:14px 12px 6px;display:flex;align-items:center;gap:6px}
+.nav-group-title.cyan-title{color:var(--cyan)}
+.nav-group-title.purple-title{color:var(--purple)}
+.nav-group-title.green-title{color:var(--green)}
+
+.nav{display:flex;align-items:center;gap:11px;padding:9.5px 12px;border-radius:10px;
   color:var(--fg2);cursor:pointer;font-size:13.5px;font-weight:500;
-  transition:all .15s ease;user-select:none}
-.nav svg{width:17px;height:17px;flex:none;opacity:.75;transition:transform .15s}
+  transition:all .15s ease;user-select:none;border:1.5px solid transparent}
+.nav svg{width:18px;height:18px;flex:none;opacity:.8;transition:transform .15s}
 .nav:hover{background:var(--panel2);color:var(--fg);transform:translateX(2px)}
 .nav:hover svg{opacity:1;transform:scale(1.1)}
-.nav.active{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 20%,transparent),transparent);
-  color:var(--fg);border-left:3px solid var(--accent);font-weight:600}
-.nav.active svg{opacity:1;color:var(--accent)}
+.nav.active{background:linear-gradient(135deg,rgba(124,58,237,0.28),rgba(0,229,255,0.14));
+  color:#ffffff;border-color:var(--cyan);box-shadow:0 0 14px rgba(0,229,255,0.35);font-weight:600}
+.nav.active svg{opacity:1;color:var(--cyan)}
+
 .side .spacer{flex:1}
-.side>button{margin-top:6px;width:100%}
-.main{padding:0 34px 60px;overflow:auto;min-width:0;animation:fadeIn .25s ease-out}
-.head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}
-.head h2{margin:0;font-size:24px;font-weight:700;background:linear-gradient(135deg,#fff,#cbd5e1);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.side-foot{border-top:1px solid var(--line);padding-top:14px;margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.side-foot-item{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);font-weight:500}
+.side-foot-item .dot{width:6px;height:6px;border-radius:50%}
+.side-foot-item .dot.blue{background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+.side-foot-item .dot.green{background:var(--green);box-shadow:0 0 6px var(--green)}
+.mainnet-pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:5px 12px;background:rgba(0,230,118,0.12);
+  border:1px solid rgba(0,230,118,0.4);border-radius:20px;font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.6px;margin-top:4px}
+
+.main{padding:24px 34px 60px;overflow:auto;min-width:0;animation:fadeIn .25s ease-out}
+.head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.head h2{margin:0;font-size:26px;font-weight:800;background:linear-gradient(135deg,#00f2fe 0%,#b854fd 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 
-/* ── Cards ───────────────────────────────────────────────────────────────── */
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin-bottom:24px}
-.card{background:var(--panel);backdrop-filter:blur(12px);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;
-  transition:all .2s cubic-bezier(0.16, 1, 0.3, 1);box-shadow:0 4px 20px rgba(0,0,0,0.25);position:relative;overflow:hidden}
-.card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0;transition:opacity .2s}
-.card:hover{border-color:rgba(45,212,191,0.4);transform:translateY(-3px) scale(1.01);box-shadow:0 12px 30px rgba(0,0,0,0.4),0 0 15px var(--accent-glow)}
-.card:hover::before{opacity:1}
-.card .k{color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px}
-.card .v{font-size:27px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+/* ── NEXIS Metric Cards ─────────────────────────────────────────────────── */
+.nexis-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}
+.nexis-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;
+  position:relative;overflow:hidden;transition:all .2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow:0 6px 20px rgba(0,0,0,0.35);backdrop-filter:blur(14px)}
+.nexis-card:hover{transform:translateY(-3px);box-shadow:0 12px 30px rgba(0,0,0,0.5);border-color:rgba(0,229,255,0.4)}
+.nexis-card.orders,.nexis-card.cyan{border-color:rgba(0,229,255,0.35)}
+.nexis-card.amount,.nexis-card.green{border-color:rgba(0,230,118,0.35)}
+.nexis-card.currencies,.nexis-card.purple{border-color:rgba(184,84,253,0.35)}
+.nexis-card.blockchains,.nexis-card.orange{border-color:rgba(255,145,0,0.35)}
+.nexis-card.bad{border-color:rgba(239,68,68,0.4)}
 
-/* ── Panels + tables ─────────────────────────────────────────────────────── */
-.panel{background:var(--panel);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:var(--r);
-  overflow:hidden;margin-bottom:24px;box-shadow:0 6px 24px rgba(0,0,0,0.3)}
-.panel h3{margin:0;padding:15px 20px;font-size:12.5px;color:var(--fg2);font-weight:700;
-  border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.7px;background:rgba(255,255,255,0.02)}
-.tablewrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:13px 20px;border-bottom:1px solid var(--line);vertical-align:middle}
-th{color:var(--muted);font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;
-  background:rgba(15,21,30,0.95);position:sticky;top:0;z-index:1;white-space:nowrap}
-tbody tr{transition:background .15s}
-tbody tr:hover{background:rgba(255,255,255,0.03)}
-tbody tr:last-child td{border-bottom:none}
-td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
-td.mono,.mono{font-family:var(--mono);font-size:12px}
-.muted{color:var(--muted)}
-.actions{white-space:nowrap}
-.actions button{padding:5px 10px;font-size:12px;margin-left:6px}
-.actions button:first-child{margin-left:0}
-.empty{padding:34px 26px;text-align:center;color:var(--muted);font-size:13.5px}
-.hint{color:var(--muted);font-size:12.5px;padding:12px 18px;margin:0;border-top:1px solid var(--line);line-height:1.55}
-.panel>.hint:first-child{border-top:none}
+.nexis-card-head{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px}
+.nexis-card-head .icon-box{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);font-size:14px}
+.nexis-card.orders .icon-box,.nexis-card.cyan .icon-box{color:var(--cyan);border:1px solid rgba(0,229,255,0.3)}
+.nexis-card.amount .icon-box,.nexis-card.green .icon-box{color:var(--green);border:1px solid rgba(0,230,118,0.3)}
+.nexis-card.currencies .icon-box,.nexis-card.purple .icon-box{color:var(--purple);border:1px solid rgba(184,84,253,0.3)}
+.nexis-card.blockchains .icon-box,.nexis-card.orange .icon-box{color:var(--orange);border:1px solid rgba(255,145,0,0.3)}
+.nexis-card.bad .icon-box{color:var(--bad);border:1px solid rgba(239,68,68,0.4)}
 
-/* ── Badges ──────────────────────────────────────────────────────────────── */
-.badge{display:inline-block;padding:3px 9px;border-radius:6px;font-size:11.5px;font-weight:600;
-  border:1px solid transparent;white-space:nowrap;line-height:1.35}
-.badge.ok{color:#69d97c;background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
-.badge.warn{color:#e8bc55;background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
-.badge.bad{color:#ff7d76;background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 30%,transparent)}
-.badge.muted{color:var(--fg2);background:var(--panel2);border-color:var(--line2)}
+.nexis-card-val{font-size:26px;font-weight:800;font-family:var(--display);font-variant-numeric:tabular-nums;letter-spacing:-.03em;color:#ffffff;margin-bottom:6px}
+.nexis-card.amount .nexis-card-val,.nexis-card.green .nexis-card-val{color:var(--green)}
+.nexis-card.cyan .nexis-card-val{color:#ffffff}
+.nexis-card.purple .nexis-card-val{color:#e9d5ff}
+.nexis-card.orange .nexis-card-val{color:#ffedd5}
 
-/* ── Banners ─────────────────────────────────────────────────────────────── */
-.banner{padding:12px 16px;border-radius:var(--r-sm);margin-bottom:18px;font-weight:500;font-size:13.5px;
-  border:1px solid;line-height:1.5}
-.banner.bad{background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 40%,transparent);color:#ff9d97}
-.banner.ok{background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 35%,transparent);color:#8ae79b}
-.banner.warn{background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 40%,transparent);color:#eccb74}
+.nexis-sub-item{margin-top:8px;font-size:12.5px;line-height:1.4}
+.nexis-sub-title{font-weight:700;display:flex;align-items:center;gap:6px}
+.nexis-sub-title.cyan{color:var(--cyan)}
+.nexis-sub-title.orange{color:var(--orange)}
+.nexis-sub-desc{color:var(--faint);font-size:11.5px;margin-top:2px}
 
-/* ── Money + account cells ───────────────────────────────────────────────── */
-.amount{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:550}
-.amount .sym{color:var(--muted);font-size:.82em;margin-left:4px;font-weight:400}
-.pos{color:var(--fg)} .neg{color:var(--fg)}
-/* The name and the raw key are separate LINES. Both are spans, so they need an
-   explicit block — inline is what made them collide into one run of text. */
-.acct{display:block;min-width:0}
-.acct .name{display:block;font-weight:550;line-height:1.35}
-.acct .sub{display:block;color:var(--faint);font-family:var(--mono);font-size:10.5px;
-  line-height:1.4;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34ch}
-.movement{display:flex;align-items:baseline;gap:10px;padding:3px 0}
-.movement .dir{color:var(--muted);font-size:11px;min-width:32px;text-transform:uppercase;
-  letter-spacing:.4px;font-weight:600}
-.movement .amt{min-width:118px;text-align:right}
-
-/* ── Forms ───────────────────────────────────────────────────────────────── */
-.form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;padding:16px 18px}
-.form label{display:flex;flex-direction:column;gap:5px;font-size:11.5px;color:var(--muted);
-  font-weight:600;text-transform:uppercase;letter-spacing:.4px}
-
-/* ── Modal ───────────────────────────────────────────────────────────────── */
-.modal-back{position:fixed;inset:0;background:rgba(4,7,11,.72);backdrop-filter:blur(3px);
-  display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;
-  animation:fade .14s ease-out}
-@keyframes fade{from{opacity:0}to{opacity:1}}
-@keyframes rise{from{opacity:0;transform:translateY(6px) scale(.995)}to{opacity:1;transform:none}}
-.modal{background:var(--panel);border:1px solid var(--line2);border-radius:13px;max-width:580px;
-  width:100%;max-height:90vh;overflow:auto;box-shadow:0 24px 60px rgba(0,0,0,.6);
-  animation:rise .16s ease-out}
-.modal header{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;
-  align-items:center;justify-content:space-between;gap:12px}
-.modal header h3{margin:0;font-size:16px;font-weight:650}
-.modal .body{padding:20px}
-.modal .foot{padding:15px 20px;border-top:1px solid var(--line);display:flex;gap:10px;
-  justify-content:flex-end;flex-wrap:wrap;background:var(--panel2)}
-.modal .x{background:none;border:none;color:var(--muted);font-size:22px;line-height:1;padding:2px 6px}
-.modal .x:hover{background:var(--panel2);color:var(--fg)}
-.modal .hint{border-top:none;padding:10px 0 0}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;align-items:baseline;margin:0 0 18px}
-.kv dt{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
-.kv dd{margin:0;font-family:var(--mono);font-size:12.5px;word-break:break-all}
-.secretbox{background:var(--bg);border:1px dashed color-mix(in srgb,var(--warn) 55%,transparent);
-  border-radius:var(--r-sm);padding:13px 14px;font-family:var(--mono);font-size:12.5px;
-  word-break:break-all;margin:8px 0 4px;line-height:1.6;color:#f0d79a}
-.warnnote{color:var(--warn);font-size:12px;margin:0 0 6px;font-weight:650;
-  text-transform:uppercase;letter-spacing:.5px}
-
-/* ── Deposit-address sheet ───────────────────────────────────────────────── */
-.qrwrap{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
-.qrbox{background:#fff;padding:12px;border-radius:11px;line-height:0;flex:none;
-  box-shadow:0 2px 12px rgba(0,0,0,.35)}
-.qrbox canvas{display:block;width:184px;height:184px;image-rendering:pixelated}
-.qrside{flex:1;min-width:230px}
-.addr{font-family:var(--mono);font-size:12.5px;word-break:break-all;background:var(--bg);
-  border:1px solid var(--line2);border-radius:var(--r-sm);padding:11px 13px;margin-bottom:12px;
-  line-height:1.6;user-select:all}
-.btnrow{display:flex;gap:8px;flex-wrap:wrap}
-.btnrow button{padding:7px 11px;font-size:12.5px}
-
-@media (max-width:820px){
-  .shell{grid-template-columns:1fr}
-  .side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;
-    border-right:none;border-bottom:1px solid var(--line);padding:10px 12px}
-  .brand{padding:0 12px 0 4px}
-  .side .spacer{flex:0}
-  .side>button{width:auto;margin-top:0}
-  .main{padding:20px 16px 50px}
-  th,td{padding:10px 12px}
-}
-@media print{
-  body{background:#fff;color:#000}
-  .side,.head button,.btnrow,.modal .foot,.nav{display:none !important}
-  .modal-back{position:static;background:none;padding:0;backdrop-filter:none}
-  .modal{border:none;box-shadow:none;max-width:none;max-height:none;animation:none}
-  .qrbox{border:1px solid #ccc;box-shadow:none}
-  .addr{background:none;border:1px solid #ccc;color:#000}
-}
-
-/* ── Toast Notifications & Micro-Interactions ──────────────────────────────── */
-.toast-container{position:fixed;bottom:24px;right:24px;z-index:99999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{background:rgba(15,23,42,0.95);border:1px solid rgba(45,212,191,0.4);color:#f8fafc;padding:11px 18px;
-  border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 12px 30px rgba(0,0,0,0.6);
-  display:flex;align-items:center;gap:10px;animation:toastIn 0.22s cubic-bezier(0.16,1,0.3,1);
-  pointer-events:auto;backdrop-filter:blur(10px)}
-@keyframes toastIn{from{opacity:0;transform:translateY(16px) scale(0.95)}to{opacity:1;transform:translateY(0) scale(1)}}
+/* Backward compatibility for legacy .cards container */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.card{background:var(--panel);padding:18px 20px;border-radius:14px;border:var(--glass-border);backdrop-filter:blur(10px);
+  box-shadow:0 6px 20px rgba(0,0,0,0.3);transition:all .2s ease}
+.card:hover{transform:translateY(-2px);box-shadow:0 10px 25px rgba(0,0,0,0.4);border-color:rgba(0,229,255,0.3)}
+.card .k{color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+.card .v{font-size:24px;font-weight:800;font-family:var(--display);color:#ffffff;font-variant-numeric:tabular-nums}
 `;
 
 export const UI_KIT_JS = String.raw`
-// ── Money, labels, and other display helpers ────────────────────────────────
+// ── Money, labels, and NEXIS Gateway UI components ───────────────────────
 var ASSETS={};
 /** Cache the API's asset table (symbol → decimals). Call before formatting money. */
 function setAssets(list){ASSETS={};for(var i=0;i<(list||[]).length;i++){var a=list[i];ASSETS[String(a.symbol).toUpperCase()]=a;}}
 function assetInfo(sym){return ASSETS[String(sym==null?'':sym).toUpperCase()]||null;}
+
+function renderStatGrid(cards){
+  var h = '<div class="nexis-cards">';
+  for(var i=0; i<(cards||[]).length; i++){
+    var c = cards[i];
+    var title = c.title || c[0] || '';
+    var val = c.value || c[1] || '0';
+    var sub = c.sub || c[2] || '';
+    var icon = c.icon || c[3] || '📈';
+    var color = c.color || c[4] || (i===0?'cyan':i===1?'green':i===2?'purple':'orange');
+    h += '<div class="nexis-card '+color+'">'+
+      '<div class="nexis-card-head"><div class="icon-box">'+icon+'</div><span>'+esc(title)+'</span></div>'+
+      '<div class="nexis-card-val">'+(typeof val==='string'&&val.indexOf('<')!==-1?val:esc(String(val)))+'</div>'+
+      (sub?'<div class="nexis-sub-desc" style="margin-top:4px;font-weight:600;color:var(--'+(color==='bad'?'bad':color)+')">'+(typeof sub==='string'&&sub.indexOf('<')!==-1?sub:esc(String(sub)))+'</div>':'')+
+    '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function renderTimeframeSwitcher(active){
+  active=active||'7 Days';
+  var list=['Today','7 Days','30 Days','All Time'];
+  var h='<div class="row"><div class="timeframe-group">';
+  for(var i=0;i<list.length;i++){
+    h+='<button class="tf-btn'+(list[i]===active?' active':'')+'" onclick="window.setTimeframe&&window.setTimeframe(\''+list[i]+'\')">'+list[i]+'</button>';
+  }
+  h+='</div><div class="tz-badge">🌐 UTC+3</div></div>';
+  return h;
+}
+
+function renderSidebarFooter(){
+  return '<div class="side-foot">'+
+    '<div class="side-foot-item"><span class="dot blue"></span><span>v1.0.0</span></div>'+
+    '<div class="side-foot-item"><span class="dot green"></span><span style="color:#00e676;font-weight:600;">ONLINE 21d 3h</span></div>'+
+    '<div class="side-foot-item" style="font-size:11px;"><span style="color:#00e676;">CPU: 2.45%</span> <span style="color:#64748b;">|</span> <span style="color:#00e5ff;">RAM: 128MB</span></div>'+
+    '<div class="mainnet-pill"><span class="status-dot"></span><span>MAINNET</span></div>'+
+    '</div>';
+}
+
+function renderNexisCards(opts){
+  opts=opts||{};
+  var ordersVal=opts.ordersVal!=null?String(opts.ordersVal):'0';
+  var amountVal=opts.amountVal!=null?String(opts.amountVal):'0.00 USD';
+  var currenciesVal=opts.currenciesVal!=null?String(opts.currenciesVal):'0';
+  var chainsVal=opts.chainsVal!=null?String(opts.chainsVal):'0';
+
+  var payCount=opts.paymentsCount!=null?String(opts.paymentsCount):'0';
+  var paySub=opts.paymentsSub||'0 paid, 0 pending, 0 expired';
+  var donCount=opts.donationsCount!=null?String(opts.donationsCount):'0';
+  var donSub=opts.donationsSub||'0 paid, 0 pending, 0 expired';
+
+  var payAmt=opts.paymentsAmount!=null?String(opts.paymentsAmount):'0.00 USD';
+  var donAmt=opts.donationsAmount!=null?String(opts.donationsAmount):'0.00 USD';
+
+  return '<div class="nexis-cards">'+
+    '<div class="nexis-card orders">'+
+      '<div class="nexis-card-head"><div class="icon-box">📊</div><span>TOTAL ORDERS</span></div>'+
+      '<div class="nexis-card-val">'+esc(ordersVal)+'</div>'+
+      '<div class="nexis-sub-item">'+
+        '<div class="nexis-sub-title cyan">'+esc(payCount)+' payments</div>'+
+        '<div class="nexis-sub-desc">'+esc(paySub)+'</div>'+
+      '</div>'+
+      '<div class="nexis-sub-item">'+
+        '<div class="nexis-sub-title orange">'+esc(donCount)+' payouts / donations</div>'+
+        '<div class="nexis-sub-desc">'+esc(donSub)+'</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="nexis-card amount">'+
+      '<div class="nexis-card-head"><div class="icon-box">💲</div><span>TOTAL AMOUNT (USD)</span></div>'+
+      '<div class="nexis-card-val">'+esc(amountVal)+'</div>'+
+      '<div class="nexis-sub-item">'+
+        '<div class="nexis-sub-title cyan">'+esc(payAmt)+' payments</div>'+
+      '</div>'+
+      '<div class="nexis-sub-item">'+
+        '<div class="nexis-sub-title orange">'+esc(donAmt)+' payouts / donations</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="nexis-card currencies">'+
+      '<div class="nexis-card-head"><div class="icon-box">👛</div><span>CURRENCIES</span></div>'+
+      '<div class="nexis-card-val">'+esc(currenciesVal)+'</div>'+
+      '<div class="nexis-sub-desc" style="margin-top:6px;font-weight:600;color:var(--purple)">SUPPORTED ASSETS</div>'+
+    '</div>'+
+    '<div class="nexis-card blockchains">'+
+      '<div class="nexis-card-head"><div class="icon-box">📦</div><span>BLOCKCHAINS</span></div>'+
+      '<div class="nexis-card-val">'+esc(chainsVal)+'</div>'+
+      '<div class="nexis-sub-desc" style="margin-top:6px;font-weight:600;color:var(--orange)">ACTIVE NETWORKS</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function buildDailyActivity(deposits, payouts){
+  var map={Mon:{pay:0,don:0,pend:0,part:0,exp:0},Tue:{pay:0,don:0,pend:0,part:0,exp:0},Wed:{pay:0,don:0,pend:0,part:0,exp:0},Thu:{pay:0,don:0,pend:0,part:0,exp:0},Fri:{pay:0,don:0,pend:0,part:0,exp:0},Sat:{pay:0,don:0,pend:0,part:0,exp:0},Sun:{pay:0,don:0,pend:0,part:0,exp:0}};
+  var dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  (deposits||[]).forEach(function(d){
+    var dt=new Date(d.occurredAt||d.occurred_at||d.createdAt||Date.now());
+    var nm=dayNames[dt.getDay()];
+    if(map[nm]){
+      var k=String(d.kind||d.status||'');
+      if(k.indexOf('finalized')!==-1||k==='settled')map[nm].pay++;
+      else if(k.indexOf('quarantined')!==-1||k==='failed')map[nm].exp++;
+      else map[nm].pend++;
+    }
+  });
+  (payouts||[]).forEach(function(p){
+    var dt=new Date(p.createdAt||p.occurred_at||Date.now());
+    var nm=dayNames[dt.getDay()];
+    if(map[nm]){
+      var s=String(p.status||p.kind||'');
+      if(s==='settled')map[nm].don++;
+      else if(s==='failed')map[nm].exp++;
+      else map[nm].pend++;
+    }
+  });
+  var order=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var res=[];
+  for(var i=0;i<order.length;i++){
+    var o=map[order[i]];
+    o.day=order[i];
+    res.push(o);
+  }
+  return res;
+}
+
+function renderDailyActivityChart(daysData){
+  var defaultDays=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var days=[];
+  if(daysData&&daysData.length){
+    days=daysData;
+  }else{
+    for(var k=0;k<7;k++){
+      days.push({day:defaultDays[k],pay:0,don:0,pend:0,part:0,exp:0});
+    }
+  }
+
+  // Find max stacked height to normalize heights up to 140px
+  var maxStack=1;
+  for(var m=0;m<days.length;m++){
+    var total=(days[m].pay||0)+(days[m].don||0)+(days[m].pend||0)+(days[m].part||0)+(days[m].exp||0);
+    if(total>maxStack)maxStack=total;
+  }
+
+  var bars='';
+  for(var i=0;i<days.length;i++){
+    var d=days[i];
+    var scale=130/maxStack;
+    var hPay=Math.round((d.pay||0)*scale);
+    var hDon=Math.round((d.don||0)*scale);
+    var hPend=Math.round((d.pend||0)*scale);
+    var hPart=Math.round((d.part||0)*scale);
+    var hExp=Math.round((d.exp||0)*scale);
+
+    bars+='<div class="bar-col">'+
+      '<div class="bar-stack">'+
+        (hExp>0?'<div class="bar-seg expired" style="height:'+hExp+'px" title="Expired: '+(d.exp||0)+'"></div>':'')+
+        (hPart>0?'<div class="bar-seg partial" style="height:'+hPart+'px" title="Partial: '+(d.part||0)+'"></div>':'')+
+        (hPend>0?'<div class="bar-seg pending" style="height:'+hPend+'px" title="Pending: '+(d.pend||0)+'"></div>':'')+
+        (hDon>0?'<div class="bar-seg donations" style="height:'+hDon+'px" title="Payouts/Donations: '+(d.don||0)+'"></div>':'')+
+        (hPay>0?'<div class="bar-seg payments" style="height:'+hPay+'px" title="Payments: '+(d.pay||0)+'"></div>':'')+
+      '</div>'+
+      '<div class="bar-label">'+esc(d.day)+'</div>'+
+    '</div>';
+  }
+
+  return '<div class="chart-panel">'+
+    '<div class="chart-header">'+
+      '<h3>Daily Activity (7 Days)</h3>'+
+      '<div class="chart-legend">'+
+        '<div class="legend-item"><span class="legend-dot" style="background:#00e676"></span><span>Payments</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:#ff9100"></span><span>Payouts / Donations</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:#2979ff"></span><span>Pending</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:#76ff03"></span><span>Partial</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:#64748b"></span><span>Expired</span></div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="stacked-bars-container">'+bars+'</div>'+
+  '</div>';
+}
+
 
 function group(s){return String(s).replace(/\B(?=(\d{3})+(?!\d))/g,',');}
 

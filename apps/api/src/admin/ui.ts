@@ -24,11 +24,14 @@ export const ADMIN_HTML = `<!doctype html>
 
 export const ADMIN_CSS = `
 ${UI_KIT_CSS}
-/* Admin identity: electric cyan. Everything else is the shared kit above. */
-:root{ --accent:#00e5ff; --accent-hi:#5ce1d1; }
-.detail{background:var(--bg);border:1px solid var(--line2);border-radius:var(--r-sm);padding:14px;
-  margin:0 18px 18px;white-space:pre-wrap;word-break:break-all;font-family:var(--mono);
-  font-size:12px;line-height:1.6;max-height:340px;overflow:auto}
+/* Admin identity: egofi's primary blue. Everything else is the shared kit above.
+   \`--accent\` is the button/ring background; \`--accent-ink\` is the same hue made
+   readable as TEXT, which is why the two diverge under dark. */
+:root{ --accent:#1D4ED8; --accent-hi:#1E40AF; --accent-fg:#fff; --accent-ink:#1D4ED8; }
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){ --accent:#2563EB; --accent-hi:#3B82F6; --accent-ink:#60A5FA; }
+}
+:root[data-theme="dark"]{ --accent:#2563EB; --accent-hi:#3B82F6; --accent-ink:#60A5FA; }
 .keyrow.revoked td{opacity:.5}
 .keyrow.revoked td:last-child{opacity:1}
 `;
@@ -76,9 +79,9 @@ ${UI_KIT_JS}
   function panel(title,inner){return '<div class="panel"><h3>'+esc(title)+'</h3>'+inner+'</div>';}
 
   var NAV_GROUPS=[
-    {title:'ANALYTICS',cls:'cyan-title',items:[['overview','Statistics / Overview'],['earnings','Earnings & Revenue']]},
-    {title:'WIDGETS',cls:'cyan-title',items:[['tenants','Tenants'],['ledger','Ledger'],['deposits','Deposits'],['payouts','Payouts']]},
-    {title:'SETTINGS',cls:'purple-title',items:[['webhooks','Webhooks'],['audit','Admin audit'],['errors','Errors']]}
+    {title:'OVERVIEW',items:[['overview','Statistics / Overview'],['earnings','Earnings & Revenue']]},
+    {title:'LEDGER',items:[['tenants','Tenants'],['ledger','Ledger'],['deposits','Deposits'],['payouts','Payouts']]},
+    {title:'SETTINGS',items:[['webhooks','Webhooks'],['audit','Admin audit'],['errors','Errors']]}
   ];
 
   function showWalletVerificationSheet(chain, address, asset){
@@ -114,7 +117,7 @@ ${UI_KIT_JS}
 
   var assetsReady=null;
   function ensureAssets(){
-    if(!assetsReady)assetsReady=api('/admin/api/assets').then(function(d){setAssets(d.assets);});
+    if(!assetsReady)assetsReady=api('/admin/api/assets').then(function(d){setAssets(d.assets);setEngineEnv(d.env);});
     return assetsReady;
   }
 
@@ -123,7 +126,7 @@ ${UI_KIT_JS}
     var navHtml='';
     for(var g=0;g<NAV_GROUPS.length;g++){
       var grp=NAV_GROUPS[g];
-      navHtml+='<div class="nav-group-title '+grp.cls+'"><span>'+grp.title+'</span></div>';
+      navHtml+='<div class="nav-group-title"><span>'+grp.title+'</span></div>';
       for(var i=0;i<grp.items.length;i++){
         var item=grp.items[i];
         navHtml+='<div class="nav'+(item[0]===view?' active':'')+'" data-nav="'+item[0]+'">'+navIcon(item[0])+'<span>'+item[1]+'</span></div>';
@@ -189,16 +192,15 @@ ${UI_KIT_JS}
       var totalVolumeStr = d.solvency.map(function(s){ return money(s.assets, s.asset) + ' ' + s.asset; }).join(' + ') || '0.00 USDT';
 
       var nexisCardsHtml = renderNexisCards({
-        ordersVal: num(totalOrders),
-        amountVal: totalVolumeStr,
-        currenciesVal: num(d.solvency.length),
-        chainsVal: '5',
-        paymentsCount: num(deposits.length),
-        paymentsSub: finalizedDep + ' finalized, ' + pendingDep + ' pending, ' + quadDep + ' held',
-        donationsCount: num(payouts.length),
-        donationsSub: settledPay + ' settled, ' + pendingPay + ' locked/pending, ' + failedPay + ' failed',
-        paymentsAmount: deposits.length + ' incoming',
-        donationsAmount: payouts.length + ' outgoing'
+        movements: num(totalOrders),
+        held: totalVolumeStr,
+        assets: num(d.solvency.length),
+        depositCount: num(deposits.length),
+        depositSub: finalizedDep + ' finalized, ' + pendingDep + ' pending, ' + quadDep + ' held',
+        payoutCount: num(payouts.length),
+        payoutSub: settledPay + ' settled, ' + pendingPay + ' locked/pending, ' + failedPay + ' failed',
+        inflow: deposits.length,
+        outflow: payouts.length
       });
 
       var dailyActivityData = buildDailyActivity(deposits, payouts);
@@ -562,6 +564,7 @@ ${UI_KIT_JS}
     }).catch(fail);
   };
 
+  initTheme();
   render();
 })();
 `;

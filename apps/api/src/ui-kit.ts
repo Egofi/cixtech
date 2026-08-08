@@ -20,176 +20,456 @@
  */
 
 /**
- * The whole visual system for both consoles. Each SPA supplies only its accent
- * hue (admin blue, portal teal) — everything structural is shared, so the two
- * cannot drift apart the way two hand-maintained copies of the same 50 lines do.
+ * The whole visual system for both consoles — a port of egofi's "Gulf of Guinea"
+ * design tokens (`@egofi/ui/tailwind-preset`) to plain CSS, so the custody engine
+ * and the gateway that fronts it read as one product family.
+ *
+ * The port keeps egofi's load-bearing idea rather than just its hex codes: **the
+ * navy ramp is inverted under dark**, so `--navy-900` means "ink" and
+ * `--navy-100` means "hairline" in both themes. Every semantic token below is
+ * derived from that ramp through `var()`, which resolves at use time — so one
+ * set of component rules serves light and dark with no per-element overrides.
+ *
+ * Theme resolves in three states, matching egofi: the OS preference by default,
+ * overridden by `data-theme` on `<html>` when the operator picks one (persisted
+ * in localStorage by `initTheme()` in the JS half).
+ *
+ * Each SPA supplies only its accent hue — admin takes primary blue, the tenant
+ * portal takes info sky — so the two stay distinguishable inside one system
+ * without being able to drift apart.
  */
 export const UI_KIT_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
+/* ── Egofi tokens: light ──────────────────────────────────────────────────── */
 :root{
-  --bg:#0b0e17; --panel:#151828; --panel2:#1a1e30; --raised:#1e2338;
-  --line:rgba(255,255,255,0.09); --line2:rgba(255,255,255,0.18);
-  --fg:#f8fafc; --fg2:#cbd5e1; --muted:#8ca0ba; --faint:#64748b;
-  --cyan:#00e5ff; --purple:#b854fd; --green:#00e676; --orange:#ff9100;
-  --ok:#00e676; --ok-bg:rgba(0,230,118,0.15);
-  --warn:#ff9100; --warn-bg:rgba(255,145,0,0.15);
-  --bad:#ef4444; --bad-bg:rgba(239,68,68,0.15);
-  --accent-glow:rgba(0,229,255,0.35);
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
-  --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  --display:'Outfit','Inter',sans-serif;
-  --r:14px; --r-sm:9px;
-  --shadow:0 14px 45px rgba(0,0,0,0.65),0 3px 12px rgba(0,0,0,0.4);
-  --glass-bg:rgba(21,24,40,0.85);
-  --glass-border:1px solid rgba(255,255,255,0.1);
+  color-scheme:light;
+  --navy-50:241 245 250;   --navy-100:225 233 243; --navy-200:195 211 231;
+  --navy-300:147 174 207;  --navy-400:91 128 176;  --navy-500:55 93 146;
+  --navy-600:37 68 117;    --navy-700:24 50 92;    --navy-800:14 36 73;
+  --navy-900:7 28 61;      --navy-950:4 15 38;
+  --surface:255 255 255; --surface-raised:255 255 255; --canvas:246 248 252;
+
+  --primary:29 78 216; --info:14 165 233; --accent-lime:163 230 53;
+  --success:74 222 128; --warning:245 158 11; --danger-rgb:251 113 133;
+
+  /* "ink" = the readable-on-this-background form of each hue. Only these flip. */
+  --primary-ink:29 78 216; --info-ink:2 132 199;  --lime-ink:63 98 18;
+  --success-ink:22 101 52; --warning-ink:180 83 9; --danger-ink:190 18 60;
+
+  --shadow-tint:7 28 61;
+  --sidebar-fg:226 235 247;
 }
+
+/* ── Egofi tokens: dark (the ramp inverts; hues brighten) ─────────────────── */
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --navy-50:22 34 54;     --navy-100:30 45 70;    --navy-200:44 62 92;
+    --navy-300:92 114 147;  --navy-400:122 144 177; --navy-500:150 170 200;
+    --navy-600:178 195 220; --navy-700:200 214 234; --navy-800:216 228 243;
+    --navy-900:233 240 249; --navy-950:244 248 252;
+    --surface:17 28 47; --surface-raised:24 37 60; --canvas:8 18 33;
+    --primary-ink:96 165 250; --info-ink:56 189 248;  --lime-ink:163 230 53;
+    --success-ink:74 222 128; --warning-ink:251 191 36; --danger-ink:251 113 133;
+    --shadow-tint:2 6 16;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --navy-50:22 34 54;     --navy-100:30 45 70;    --navy-200:44 62 92;
+  --navy-300:92 114 147;  --navy-400:122 144 177; --navy-500:150 170 200;
+  --navy-600:178 195 220; --navy-700:200 214 234; --navy-800:216 228 243;
+  --navy-900:233 240 249; --navy-950:244 248 252;
+  --surface:17 28 47; --surface-raised:24 37 60; --canvas:8 18 33;
+  --primary-ink:96 165 250; --info-ink:56 189 248;  --lime-ink:163 230 53;
+  --success-ink:74 222 128; --warning-ink:251 191 36; --danger-ink:251 113 133;
+  --shadow-tint:2 6 16;
+}
+
+/* Surfaces that are ALWAYS dark (the sidebar) pin the ramp to its light values,
+   exactly as egofi's \`.on-dark\` does: there, low-index navy is light ink on a
+   dark ground and must not invert. */
+.on-dark{
+  --navy-50:241 245 250;   --navy-100:225 233 243; --navy-200:195 211 231;
+  --navy-300:147 174 207;  --navy-400:91 128 176;  --navy-500:55 93 146;
+  --navy-600:37 68 117;    --navy-700:24 50 92;    --navy-800:14 36 73;
+  --navy-900:7 28 61;      --navy-950:4 15 38;
+}
+
+/* ── Semantics, derived from the ramp (resolved at use time, so they flip) ── */
+:root{
+  --bg:rgb(var(--canvas));
+  --panel:rgb(var(--surface));
+  --panel2:rgb(var(--navy-50));
+  --raised:rgb(var(--surface-raised));
+  --fg:rgb(var(--navy-950));
+  --fg2:rgb(var(--navy-700));
+  --muted:rgb(var(--navy-500));
+  --faint:rgb(var(--navy-400));
+  --line:rgb(var(--navy-100));
+  --line2:rgb(var(--navy-200));
+
+  --cyan:rgb(var(--primary-ink));
+  --purple:rgb(var(--info-ink));
+  --green:rgb(var(--success-ink));
+  --orange:rgb(var(--warning-ink));
+  --ok:rgb(var(--success-ink));   --ok-bg:color-mix(in srgb,rgb(var(--success)) 16%,transparent);
+  --warn:rgb(var(--warning-ink)); --warn-bg:color-mix(in srgb,rgb(var(--warning)) 16%,transparent);
+  --bad:rgb(var(--danger-ink));   --bad-bg:color-mix(in srgb,rgb(var(--danger-rgb)) 16%,transparent);
+
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --display:var(--sans);
+
+  /* Flat / square, per egofi's borderRadius override. \`--r-pill\` is kept so
+     genuine circles and pill badges stay round rather than becoming squares. */
+  --r:0; --r-sm:0; --r-pill:9999px;
+
+  --shadow-xs:0 1px 2px 0 rgb(var(--shadow-tint) / 0.04);
+  --shadow-card:0 1px 2px 0 rgb(var(--shadow-tint) / 0.04),0 6px 20px -6px rgb(var(--shadow-tint) / 0.10);
+  --shadow-card-hover:0 2px 4px 0 rgb(var(--shadow-tint) / 0.06),0 14px 32px -8px rgb(var(--shadow-tint) / 0.16);
+  --shadow:0 24px 60px -16px rgb(var(--shadow-tint) / 0.28);
+  --accent-glow:color-mix(in srgb,var(--accent) 22%,transparent);
+  --glass-border:1px solid rgb(var(--navy-100));
+
+  --brand-gradient:radial-gradient(120% 120% at 0% 0%,#0E2449 0%,#071C3D 45%,#040F26 100%);
+  --brand-mesh:radial-gradient(60% 40% at 100% 0%,rgba(29,78,216,0.05) 0%,transparent 60%),
+               radial-gradient(50% 40% at 0% 8%,rgba(14,165,233,0.05) 0%,transparent 55%);
+}
+
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:radial-gradient(circle at 50% 0%,#171b2d 0%,#0b0e17 80%);color:var(--fg);
-  font:14px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-a{color:var(--accent);text-decoration:none;transition:color .15s}
-a:hover{color:var(--accent-hi);text-decoration:none}
-h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em}
-::selection{background:color-mix(in srgb,var(--accent) 40%,transparent)}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+body{margin:0;background-color:var(--bg);background-image:var(--brand-mesh);background-attachment:fixed;
+  color:var(--fg);font:14px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  font-feature-settings:"cv02","cv03","cv04","cv11","ss01"}
+a{color:var(--accent-ink,var(--accent));text-decoration:none;transition:color .15s}
+a:hover{color:var(--accent-hi)}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;color:rgb(var(--navy-950))}
+::selection{background:color-mix(in srgb,var(--accent) 28%,transparent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-@keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-@keyframes pulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.3;transform:scale(0.85)} }
-@keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+@keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+@keyframes pulseDot { 0%,100%{opacity:1} 50%{opacity:.45} }
+@keyframes shimmer { 100%{transform:translateX(100%)} }
 
 /* ── Controls ────────────────────────────────────────────────────────────── */
-button{font:600 13px/1.2 var(--sans);cursor:pointer;border:var(--glass-border);
-  background:var(--raised);color:var(--fg);border-radius:var(--r-sm);padding:9.5px 16px;
-  transition:all .2s cubic-bezier(0.16, 1, 0.3, 1);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.2)}
-button:hover{background:#282f4a;border-color:rgba(255,255,255,0.28);transform:translateY(-1.5px);box-shadow:0 6px 18px rgba(0,0,0,0.35)}
-button:active{transform:translateY(0)}
-button:disabled{opacity:.5;cursor:not-allowed;transform:none}
-button.primary{background:linear-gradient(135deg,var(--accent),var(--accent-hi));border:none;color:#041119;font-weight:700;box-shadow:0 4px 18px var(--accent-glow)}
-button.primary:hover{box-shadow:0 6px 24px color-mix(in srgb,var(--accent) 55%,transparent);transform:translateY(-1.5px)}
-button.danger{background:transparent;border-color:color-mix(in srgb,var(--bad) 45%,transparent);color:var(--bad)}
+/* \`.button\` rides along so an <a> that acts as a button (the block-explorer
+   link) is not left as bare underlined text. */
+button,.button{font:500 14px/1.2 var(--sans);cursor:pointer;height:36px;padding:0 16px;
+  background:var(--panel);color:rgb(var(--navy-800));border:1px solid rgb(var(--navy-200));
+  border-radius:var(--r-sm);box-shadow:var(--shadow-xs);white-space:nowrap;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  transition:background .15s,box-shadow .15s,border-color .15s,transform .1s}
+button:hover,.button:hover{background:rgb(var(--navy-50));border-color:rgb(var(--navy-300))}
+button:active,.button:active{transform:scale(.98)}
+button:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+button.primary,.button.primary{background:var(--accent);color:var(--accent-fg,#fff);border-color:transparent;font-weight:600;
+  box-shadow:0 1px 3px 0 rgb(var(--shadow-tint) / 0.20)}
+button.primary:hover,.button.primary:hover{background:var(--accent-hi);box-shadow:0 4px 12px -2px var(--accent-glow)}
+button.danger{background:transparent;border-color:color-mix(in srgb,var(--bad) 40%,transparent);color:var(--bad)}
 button.danger:hover{background:var(--bad-bg);border-color:var(--bad)}
-input,select,textarea{font:14px var(--sans);background:rgba(11,14,23,0.85);border:var(--glass-border);
-  color:var(--fg);border-radius:var(--r-sm);padding:10.5px 14px;transition:all .18s ease;backdrop-filter:blur(8px)}
-input:hover,select:hover,textarea:hover{border-color:rgba(255,255,255,0.25)}
+input,select,textarea{font:14px var(--sans);background:var(--panel);border:1px solid rgb(var(--navy-200));
+  color:var(--fg);border-radius:var(--r-sm);padding:8px 12px;height:36px;transition:border-color .15s,box-shadow .15s}
+textarea{height:auto}
+input:hover,select:hover,textarea:hover{border-color:rgb(var(--navy-300))}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
-  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
 input::placeholder,textarea::placeholder{color:var(--faint)}
 
-/* ── Top Navigation Bar ─────────────────────────────────────────────────── */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;
-  background:rgba(17,20,34,0.75);backdrop-filter:blur(18px);border-bottom:1px solid var(--line);
-  position:sticky;top:0;z-index:40;margin-bottom:24px}
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 28px;
+  background:color-mix(in srgb,var(--panel) 82%,transparent);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40;margin-bottom:24px;flex-wrap:wrap}
 .topbar-left{display:flex;align-items:center;gap:16px}
-.status-pill{display:flex;align-items:center;gap:8px;padding:5px 12px;background:rgba(0,230,118,0.12);
-  border:1px solid rgba(0,230,118,0.3);border-radius:20px;font-size:12px;font-weight:600;color:#00e676}
-.status-dot{width:7px;height:7px;border-radius:50%;background:#00e676;box-shadow:0 0 8px #00e676;animation:pulseDot 2s infinite ease-in-out}
+.status-pill{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border-radius:var(--r-pill);
+  background:var(--ok-bg);border:1px solid color-mix(in srgb,rgb(var(--success)) 35%,transparent);
+  font-size:12px;font-weight:500;color:var(--ok)}
+.status-dot{width:6px;height:6px;border-radius:var(--r-pill);background:currentColor;animation:pulseDot 2s infinite ease-in-out}
 .top-search{position:relative;width:240px}
-.top-search input{width:100%;padding-left:32px;font-size:12.5px;height:34px;border-radius:18px;background:rgba(0,0,0,0.4)}
+.top-search input{width:100%;padding-left:32px;font-size:13px;height:34px}
+.theme-toggle{width:36px;padding:0;font-size:15px}
 
-/* ── Timeframe Filters & Badges ────────────────────────────────────────── */
-.timeframe-group{display:inline-flex;gap:6px;background:rgba(21,24,40,0.9);padding:4px;border-radius:10px;border:1px solid var(--line)}
-.tf-btn{padding:6px 14px;font-size:12px;font-weight:600;border-radius:7px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;transition:all .18s ease}
-.tf-btn:hover{color:var(--fg);background:rgba(255,255,255,0.04)}
-.tf-btn.active{background:#1b2138;border-color:var(--cyan);color:#38bdf8;box-shadow:0 0 12px rgba(0,229,255,0.25)}
-.tz-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid var(--line);font-size:12px;color:var(--muted);font-weight:500}
+/* ── Timeframe filter & timezone chip ────────────────────────────────────── */
+.timeframe-group{display:inline-flex;gap:2px;background:rgb(var(--navy-50));padding:3px;border:1px solid var(--line)}
+.tf-btn{height:28px;padding:0 12px;font-size:12.5px;font-weight:500;border:1px solid transparent;
+  background:transparent;color:var(--muted);box-shadow:none}
+.tf-btn:hover{color:var(--fg);background:color-mix(in srgb,var(--panel) 70%,transparent);border-color:transparent}
+.tf-btn.active{background:var(--panel);border-color:rgb(var(--navy-200));color:var(--accent-ink,var(--accent));
+  font-weight:600;box-shadow:var(--shadow-xs)}
+.tz-badge{display:inline-flex;align-items:center;gap:6px;padding:0 12px;height:34px;
+  background:rgb(var(--navy-50));border:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 
 /* ── Sign-in ─────────────────────────────────────────────────────────────── */
-.login{max-width:400px;margin:10vh auto;padding:36px;background:var(--panel);backdrop-filter:blur(16px);
-  border:1px solid var(--line2);border-radius:16px;box-shadow:var(--shadow);animation:fadeIn .25s ease-out}
-.login .mark{width:42px;height:42px;border-radius:12px;margin-bottom:18px;
-  background:linear-gradient(135deg,#7c3aed,#00e5ff);
-  display:flex;align-items:center;justify-content:center;color:#ffffff;font-weight:800;font-size:20px;box-shadow:0 4px 20px rgba(0,229,255,0.4)}
-.login h1{font-size:22px;margin:0 0 6px;font-weight:700}
+.login{max-width:400px;margin:12vh auto;padding:36px;background:var(--panel);
+  border:1px solid var(--line);box-shadow:var(--shadow);animation:fadeIn .3s cubic-bezier(0.22,1,0.36,1) both}
+.login .mark{width:42px;height:42px;margin-bottom:18px;background:var(--brand-gradient);
+  display:flex;align-items:center;justify-content:center;color:rgb(var(--accent-lime));
+  font-weight:800;font-size:20px}
+.login h1{font-size:1.75rem;line-height:2.125rem;letter-spacing:-.02em;margin:0 0 6px;font-weight:700}
 .login p{color:var(--muted);margin:0 0 22px;font-size:13.5px;line-height:1.55}
 .login input{width:100%;margin-bottom:14px}
-.login button{width:100%;padding:11px}
+.login button{width:100%;height:44px}
 .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:10px}
 
-/* ── Shell & NEXIS Sidebar Layout ───────────────────────────────────────── */
+/* ── Shell & sidebar ─────────────────────────────────────────────────────── */
 .shell{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
-.side{background:#111422;backdrop-filter:blur(16px);border-right:1px solid var(--line);padding:20px 14px;
-  display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.side{background:var(--brand-gradient);border-right:1px solid rgba(255,255,255,0.06);padding:20px 14px;
+  display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow-y:auto;
+  color:var(--sidebar-fg)}
 .brand{display:flex;align-items:center;gap:12px;padding:6px 10px 22px}
-.brand .mark{width:36px;height:36px;border-radius:10px;flex:none;
-  background:linear-gradient(135deg,#7c3aed,#00e5ff);
-  display:flex;align-items:center;justify-content:center;color:#ffffff;font-weight:800;font-size:17px;box-shadow:0 4px 16px rgba(0,229,255,0.4)}
-.brand b{display:block;font-size:15px;font-weight:800;letter-spacing:-.01em;line-height:1.25;
-  background:linear-gradient(90deg,#00f2fe,#b854fd);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.brand small{display:block;color:var(--muted);font-weight:500;font-size:11px;line-height:1.3}
+.brand .mark{width:36px;height:36px;flex:none;background:rgb(var(--accent-lime));
+  display:flex;align-items:center;justify-content:center;color:#1A2E05;font-weight:800;font-size:17px}
+.brand b{display:block;font-size:15px;font-weight:700;letter-spacing:-.01em;line-height:1.25;color:#fff}
+.brand small{display:block;color:rgba(226,235,247,0.62);font-weight:400;font-size:11px;line-height:1.3}
 
-.nav-group-title{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:14px 12px 6px;display:flex;align-items:center;gap:6px}
-.nav-group-title.cyan-title{color:var(--cyan)}
-.nav-group-title.purple-title{color:var(--purple)}
-.nav-group-title.green-title{color:var(--green)}
+.nav-group-title{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;
+  padding:16px 12px 6px;color:rgba(226,235,247,0.45)}
 
-.nav{display:flex;align-items:center;gap:11px;padding:9.5px 12px;border-radius:10px;
-  color:var(--fg2);cursor:pointer;font-size:13.5px;font-weight:500;
-  transition:all .15s ease;user-select:none;border:1.5px solid transparent}
-.nav svg{width:18px;height:18px;flex:none;opacity:.8;transition:transform .15s}
-.nav:hover{background:var(--panel2);color:var(--fg);transform:translateX(2px)}
-.nav:hover svg{opacity:1;transform:scale(1.1)}
-.nav.active{background:linear-gradient(135deg,rgba(124,58,237,0.28),rgba(0,229,255,0.14));
-  color:#ffffff;border-color:var(--cyan);box-shadow:0 0 14px rgba(0,229,255,0.35);font-weight:600}
-.nav.active svg{opacity:1;color:var(--cyan)}
+.nav{display:flex;align-items:center;gap:11px;padding:9px 12px;color:rgba(226,235,247,0.78);
+  cursor:pointer;font-size:13.5px;font-weight:500;user-select:none;
+  border-left:2px solid transparent;transition:background .15s,color .15s}
+.nav svg{width:18px;height:18px;flex:none;opacity:.75}
+.nav:hover{background:rgba(255,255,255,0.06);color:#fff}
+.nav:hover svg{opacity:1}
+.nav.active{background:rgba(255,255,255,0.10);color:#fff;border-left-color:rgb(var(--accent-lime));font-weight:600}
+.nav.active svg{opacity:1;color:rgb(var(--accent-lime))}
 
 .side .spacer{flex:1}
-.side-foot{border-top:1px solid var(--line);padding-top:14px;margin-top:12px;display:flex;flex-direction:column;gap:8px}
-.side-foot-item{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);font-weight:500}
-.side-foot-item .dot{width:6px;height:6px;border-radius:50%}
-.side-foot-item .dot.blue{background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
-.side-foot-item .dot.green{background:var(--green);box-shadow:0 0 6px var(--green)}
-.mainnet-pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:5px 12px;background:rgba(0,230,118,0.12);
-  border:1px solid rgba(0,230,118,0.4);border-radius:20px;font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.6px;margin-top:4px}
+.side button{background:rgba(255,255,255,0.07);border-color:rgba(255,255,255,0.14);color:rgba(226,235,247,0.9);box-shadow:none}
+.side button:hover{background:rgba(255,255,255,0.13);border-color:rgba(255,255,255,0.22);color:#fff}
+.side-foot{border-top:1px solid rgba(255,255,255,0.08);padding-top:14px;margin-top:12px;
+  display:flex;flex-direction:column;gap:8px}
+.side-foot-item{display:flex;align-items:center;gap:6px;font-size:11.5px;color:rgba(226,235,247,0.6)}
+.side-foot-item .dot{width:6px;height:6px;border-radius:var(--r-pill)}
+.side-foot-item .dot.blue{background:#38BDF8}
+.side-foot-item .dot.green{background:rgb(var(--success))}
+.env-pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:4px 12px;
+  border-radius:var(--r-pill);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-top:4px;
+  background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.4);color:rgb(var(--success))}
+.env-pill.testnet{background:rgba(245,158,11,0.12);border-color:rgba(245,158,11,0.45);color:#FBBF24}
 
-.main{padding:24px 34px 60px;overflow:auto;min-width:0;animation:fadeIn .25s ease-out}
-.head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px;flex-wrap:wrap}
-.head h2{margin:0;font-size:26px;font-weight:800;background:linear-gradient(135deg,#00f2fe 0%,#b854fd 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.main{padding:0 0 60px;overflow:auto;min-width:0}
+#content-body,.main>.head{padding-left:34px;padding-right:34px}
+.main>.head{padding-top:4px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px;flex-wrap:wrap;
+  animation:fadeIn .4s cubic-bezier(0.22,1,0.36,1) both}
+.head h2{margin:0;font-size:1.75rem;line-height:2.125rem;letter-spacing:-.02em;font-weight:700}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 
-/* ── NEXIS Metric Cards ─────────────────────────────────────────────────── */
-.nexis-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}
-.nexis-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;
-  position:relative;overflow:hidden;transition:all .2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow:0 6px 20px rgba(0,0,0,0.35);backdrop-filter:blur(14px)}
-.nexis-card:hover{transform:translateY(-3px);box-shadow:0 12px 30px rgba(0,0,0,0.5);border-color:rgba(0,229,255,0.4)}
-.nexis-card.orders,.nexis-card.cyan{border-color:rgba(0,229,255,0.35)}
-.nexis-card.amount,.nexis-card.green{border-color:rgba(0,230,118,0.35)}
-.nexis-card.currencies,.nexis-card.purple{border-color:rgba(184,84,253,0.35)}
-.nexis-card.blockchains,.nexis-card.orange{border-color:rgba(255,145,0,0.35)}
-.nexis-card.bad{border-color:rgba(239,68,68,0.4)}
+/* ── Metric cards ────────────────────────────────────────────────────────── */
+.nexis-cards,.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}
+.nexis-card,.card{background:var(--panel);border:1px solid color-mix(in srgb,rgb(var(--navy-100)) 80%,transparent);
+  padding:20px 22px;box-shadow:var(--shadow-card);position:relative;overflow:hidden;
+  transition:box-shadow .2s,transform .2s,border-color .2s;animation:fadeIn .4s cubic-bezier(0.22,1,0.36,1) both}
+.nexis-card:hover,.card:hover{transform:translateY(-2px);box-shadow:var(--shadow-card-hover);border-color:rgb(var(--navy-200))}
+/* A 2px hue rule along the top edge is the only colour a card carries — the
+   surface itself stays neutral so a wall of cards does not read as a rainbow. */
+.nexis-card::before{content:'';position:absolute;inset:0 0 auto 0;height:2px;background:var(--card-hue,transparent)}
+.nexis-card.orders,.nexis-card.cyan{--card-hue:rgb(var(--primary))}
+.nexis-card.amount,.nexis-card.green{--card-hue:rgb(var(--success))}
+.nexis-card.currencies,.nexis-card.purple{--card-hue:rgb(var(--info))}
+.nexis-card.blockchains,.nexis-card.orange{--card-hue:rgb(var(--warning))}
+.nexis-card.bad{--card-hue:rgb(var(--danger-rgb))}
 
-.nexis-card-head{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px}
-.nexis-card-head .icon-box{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);font-size:14px}
-.nexis-card.orders .icon-box,.nexis-card.cyan .icon-box{color:var(--cyan);border:1px solid rgba(0,229,255,0.3)}
-.nexis-card.amount .icon-box,.nexis-card.green .icon-box{color:var(--green);border:1px solid rgba(0,230,118,0.3)}
-.nexis-card.currencies .icon-box,.nexis-card.purple .icon-box{color:var(--purple);border:1px solid rgba(184,84,253,0.3)}
-.nexis-card.blockchains .icon-box,.nexis-card.orange .icon-box{color:var(--orange);border:1px solid rgba(255,145,0,0.3)}
-.nexis-card.bad .icon-box{color:var(--bad);border:1px solid rgba(239,68,68,0.4)}
-
-.nexis-card-val{font-size:26px;font-weight:800;font-family:var(--display);font-variant-numeric:tabular-nums;letter-spacing:-.03em;color:#ffffff;margin-bottom:6px}
-.nexis-card.amount .nexis-card-val,.nexis-card.green .nexis-card-val{color:var(--green)}
-.nexis-card.cyan .nexis-card-val{color:#ffffff}
-.nexis-card.purple .nexis-card-val{color:#e9d5ff}
-.nexis-card.orange .nexis-card-val{color:#ffedd5}
+.nexis-card-head{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11.5px;
+  font-weight:600;text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px}
+.nexis-card-head .icon-box{width:26px;height:26px;display:flex;align-items:center;justify-content:center;
+  background:rgb(var(--navy-50));border:1px solid var(--line);font-size:14px}
+.nexis-card-val,.card .v{font-size:1.75rem;line-height:2.125rem;font-weight:700;font-family:var(--display);
+  font-variant-numeric:tabular-nums;letter-spacing:-.025em;color:rgb(var(--navy-950));margin-bottom:6px}
+.card .k{color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
 
 .nexis-sub-item{margin-top:8px;font-size:12.5px;line-height:1.4}
-.nexis-sub-title{font-weight:700;display:flex;align-items:center;gap:6px}
+.nexis-sub-title{font-weight:600;display:flex;align-items:center;gap:6px;color:rgb(var(--navy-800))}
 .nexis-sub-title.cyan{color:var(--cyan)}
 .nexis-sub-title.orange{color:var(--orange)}
 .nexis-sub-desc{color:var(--faint);font-size:11.5px;margin-top:2px}
 
-/* Backward compatibility for legacy .cards container */
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
-.card{background:var(--panel);padding:18px 20px;border-radius:14px;border:var(--glass-border);backdrop-filter:blur(10px);
-  box-shadow:0 6px 20px rgba(0,0,0,0.3);transition:all .2s ease}
-.card:hover{transform:translateY(-2px);box-shadow:0 10px 25px rgba(0,0,0,0.4);border-color:rgba(0,229,255,0.3)}
-.card .k{color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
-.card .v{font-size:24px;font-weight:800;font-family:var(--display);color:#ffffff;font-variant-numeric:tabular-nums}
+/* ── Panels & tables ─────────────────────────────────────────────────────── */
+.panel{background:var(--panel);border:1px solid color-mix(in srgb,rgb(var(--navy-100)) 80%,transparent);
+  overflow:hidden;margin-bottom:24px;box-shadow:var(--shadow-card);
+  animation:fadeIn .4s cubic-bezier(0.22,1,0.36,1) both}
+.panel h3{margin:0;padding:15px 20px;font-size:12.5px;color:rgb(var(--navy-700));font-weight:600;
+  border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.7px;background:rgb(var(--navy-50))}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:12px 20px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;
+  background:rgb(var(--navy-50));position:sticky;top:0;z-index:1;white-space:nowrap}
+tbody tr{transition:background .15s}
+tbody tr:hover{background:rgb(var(--navy-50) / 0.6)}
+tbody tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td.mono,.mono{font-family:var(--mono);font-size:12px}
+.muted{color:var(--muted)}
+.actions{white-space:nowrap}
+.actions button{height:28px;padding:0 10px;font-size:12.5px;margin-left:6px}
+.actions button:first-child{margin-left:0}
+.empty{padding:34px 26px;text-align:center;color:var(--muted);font-size:13.5px}
+.hint{color:var(--muted);font-size:12.5px;padding:12px 20px;margin:0;border-top:1px solid var(--line);line-height:1.55}
+.panel>.hint:first-child{border-top:none}
+
+/* ── Badges ──────────────────────────────────────────────────────────────── */
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:var(--r-pill);
+  font-size:12px;font-weight:500;border:1px solid transparent;white-space:nowrap;line-height:1.5}
+.badge.ok{color:var(--ok);background:var(--ok-bg);border-color:color-mix(in srgb,rgb(var(--success)) 35%,transparent)}
+.badge.warn{color:var(--warn);background:var(--warn-bg);border-color:color-mix(in srgb,rgb(var(--warning)) 35%,transparent)}
+.badge.bad{color:var(--bad);background:var(--bad-bg);border-color:color-mix(in srgb,rgb(var(--danger-rgb)) 35%,transparent)}
+.badge.muted{color:rgb(var(--navy-700));background:rgb(var(--navy-50));border-color:var(--line2)}
+.ai-chip{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:var(--r-pill);
+  font-size:12px;font-weight:500;background:color-mix(in srgb,rgb(var(--info)) 14%,transparent);
+  border:1px solid color-mix(in srgb,rgb(var(--info)) 32%,transparent);color:var(--purple)}
+
+/* ── Banners ─────────────────────────────────────────────────────────────── */
+.banner{padding:12px 16px;margin-bottom:18px;font-weight:400;font-size:13.5px;border:1px solid;line-height:1.5}
+.banner.ok{background:var(--ok-bg);border-color:color-mix(in srgb,rgb(var(--success)) 35%,transparent);color:var(--ok)}
+.banner.warn{background:var(--warn-bg);border-color:color-mix(in srgb,rgb(var(--warning)) 38%,transparent);color:var(--warn)}
+.banner.bad{background:var(--bad-bg);border-color:color-mix(in srgb,rgb(var(--danger-rgb)) 38%,transparent);color:var(--bad)}
+
+/* ── Money + account cells ───────────────────────────────────────────────── */
+.amount{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:500}
+.amount .sym{color:var(--muted);font-size:.82em;margin-left:4px;font-weight:400}
+.pos,.neg{color:var(--fg)}
+/* The name and the raw key are separate LINES. Both are spans, so they need an
+   explicit block — inline is what made them collide into one run of text. */
+.acct{display:block;min-width:0}
+.acct .name{display:block;font-weight:500;line-height:1.35}
+.acct .sub{display:block;color:var(--faint);font-family:var(--mono);font-size:10.5px;
+  line-height:1.4;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34ch}
+.movement{display:flex;align-items:baseline;gap:10px;padding:3px 0}
+.movement .dir{color:var(--muted);font-size:11px;min-width:32px;text-transform:uppercase;
+  letter-spacing:.4px;font-weight:600}
+.movement .amt{min-width:118px;text-align:right}
+
+/* ── Forms ───────────────────────────────────────────────────────────────── */
+.form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;padding:16px 20px}
+.form label{display:flex;flex-direction:column;gap:5px;font-size:11.5px;color:var(--muted);
+  font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+
+/* ── Modal ───────────────────────────────────────────────────────────────── */
+.modal-back{position:fixed;inset:0;background:rgb(var(--navy-950) / 0.55);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;animation:fade .14s ease-out}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes rise{from{opacity:0;transform:translateY(10px) scale(.995)}to{opacity:1;transform:none}}
+.modal{background:var(--panel);border:1px solid var(--line2);max-width:580px;width:100%;
+  max-height:90vh;overflow:auto;box-shadow:var(--shadow);animation:rise .2s cubic-bezier(0.22,1,0.36,1)}
+.modal header{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;
+  align-items:center;justify-content:space-between;gap:12px}
+.modal header h3{margin:0;font-size:1.125rem;font-weight:600;letter-spacing:-.01em}
+.modal .body{padding:20px}
+.modal .body h4{margin:0 0 8px;font-size:13px;font-weight:600}
+.modal .foot{padding:15px 20px;border-top:1px solid var(--line);display:flex;gap:10px;
+  justify-content:flex-end;flex-wrap:wrap;background:rgb(var(--navy-50))}
+.modal .x{background:none;border:none;color:var(--muted);font-size:22px;line-height:1;
+  height:28px;width:28px;padding:0;box-shadow:none}
+.modal .x:hover{background:rgb(var(--navy-100));color:var(--fg)}
+.modal .hint{border-top:none;padding:10px 0 0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;align-items:baseline;margin:0 0 18px}
+.kv dt{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.kv dd{margin:0;font-family:var(--mono);font-size:12.5px;word-break:break-all}
+.faq{margin-bottom:8px;background:rgb(var(--navy-50));border:1px solid var(--line);padding:8px 12px}
+.faq summary{cursor:pointer;font-weight:600;color:var(--accent-ink,var(--accent))}
+.faq p{margin:6px 0 0;color:rgb(var(--navy-700))}
+.secretbox{background:rgb(var(--navy-50));border:1px dashed color-mix(in srgb,rgb(var(--warning)) 60%,transparent);
+  padding:13px 14px;font-family:var(--mono);font-size:12.5px;word-break:break-all;
+  margin:8px 0 4px;line-height:1.6;color:var(--warn)}
+.warnnote{color:var(--warn);font-size:12px;margin:0 0 6px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.5px}
+.detail{background:rgb(var(--navy-50));border:1px solid var(--line2);padding:14px;margin:0 20px 20px;
+  white-space:pre-wrap;word-break:break-all;font-family:var(--mono);font-size:12px;
+  line-height:1.6;max-height:340px;overflow:auto}
+
+/* ── Deposit-address sheet ───────────────────────────────────────────────── */
+.qrwrap{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.qrbox{background:#fff;padding:12px;line-height:0;flex:none;border:1px solid var(--line2)}
+.qrbox canvas{display:block;width:184px;height:184px;image-rendering:pixelated}
+.qrside{flex:1;min-width:230px}
+.addr{font-family:var(--mono);font-size:12.5px;word-break:break-all;background:rgb(var(--navy-50));
+  border:1px solid var(--line2);padding:11px 13px;margin-bottom:12px;line-height:1.6;user-select:all}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+.btnrow button{height:32px;padding:0 12px;font-size:12.5px}
+
+/* ── Activity chart ──────────────────────────────────────────────────────── */
+.chart-panel{background:var(--panel);border:1px solid color-mix(in srgb,rgb(var(--navy-100)) 80%,transparent);
+  padding:20px 22px;margin-bottom:24px;box-shadow:var(--shadow-card)}
+.chart-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.chart-header h3{margin:0;font-size:14px;font-weight:600}
+.chart-legend{display:flex;gap:14px;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.legend-dot{width:8px;height:8px;border-radius:var(--r-pill);flex:none}
+.stacked-bars-container{display:flex;align-items:flex-end;justify-content:space-around;gap:12px;height:170px}
+.bar-col{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;min-width:0}
+.bar-stack{display:flex;flex-direction:column;justify-content:flex-end;width:100%;max-width:44px;height:140px}
+.bar-seg{width:100%;transition:opacity .15s}
+.bar-seg:hover{opacity:.75}
+.bar-seg.payments{background:rgb(var(--success))}
+.bar-seg.donations{background:rgb(var(--warning))}
+.bar-seg.pending{background:rgb(var(--primary))}
+.bar-seg.partial{background:rgb(var(--accent-lime))}
+.bar-seg.expired{background:rgb(var(--navy-300))}
+.bar-label{font-size:11.5px;color:var(--muted);font-weight:500}
+
+/* ── Toasts ──────────────────────────────────────────────────────────────── */
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:99999;display:flex;
+  flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:rgb(var(--navy-950));color:rgb(var(--surface));padding:11px 18px;font-size:13.5px;
+  box-shadow:var(--shadow);display:flex;align-items:center;gap:10px;
+  animation:toastIn .22s cubic-bezier(0.22,1,0.36,1)}
+@keyframes toastIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+
+@media (max-width:820px){
+  .shell{grid-template-columns:1fr}
+  .side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;
+    border-right:none;border-bottom:1px solid rgba(255,255,255,0.08);padding:10px 12px}
+  .brand{padding:0 12px 0 4px}
+  .side .spacer{flex:0}
+  .side-foot{border-top:none;margin-top:0;padding-top:0;flex-direction:row;align-items:center;gap:12px}
+  .nav{border-left:none;border-bottom:2px solid transparent}
+  .nav.active{border-left-color:transparent;border-bottom-color:rgb(var(--accent-lime))}
+  .topbar{padding:12px 16px}
+  #content-body,.main>.head{padding-left:16px;padding-right:16px}
+  th,td{padding:10px 12px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;
+    transition-duration:.01ms !important}
+}
+@media print{
+  body{background:#fff;color:#000}
+  .side,.topbar,.head button,.btnrow,.modal .foot,.nav{display:none !important}
+  .modal-back{position:static;background:none;padding:0;backdrop-filter:none}
+  .modal{border:none;box-shadow:none;max-width:none;max-height:none;animation:none}
+  .qrbox{border:1px solid #ccc}
+  .addr{background:none;border:1px solid #ccc;color:#000}
+}
 `;
 
 export const UI_KIT_JS = String.raw`
-// ── Money, labels, and NEXIS Gateway UI components ───────────────────────
+// ── Money, labels, and shared console components ─────────────────────────
+
+/**
+ * Theme resolution, matching egofi's three states: no attribute means "follow
+ * the OS", and an explicit choice stamps data-theme on <html> so the CSS
+ * override blocks win in both directions. Persisted per console.
+ */
+function initTheme(){
+  var saved=null;
+  try{saved=localStorage.getItem('cx_theme');}catch(e){}
+  if(saved==='dark'||saved==='light')document.documentElement.setAttribute('data-theme',saved);
+}
+function currentTheme(){
+  var attr=document.documentElement.getAttribute('data-theme');
+  if(attr)return attr;
+  return window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+}
+function toggleTheme(){
+  var next=currentTheme()==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',next);
+  try{localStorage.setItem('cx_theme',next);}catch(e){}
+  render();
+}
+
 var ASSETS={};
 /** Cache the API's asset table (symbol → decimals). Call before formatting money. */
 function setAssets(list){ASSETS={};for(var i=0;i<(list||[]).length;i++){var a=list[i];ASSETS[String(a.symbol).toUpperCase()]=a;}}
@@ -221,68 +501,76 @@ function renderTimeframeSwitcher(active){
   for(var i=0;i<list.length;i++){
     h+='<button class="tf-btn'+(list[i]===active?' active':'')+'" onclick="window.setTimeframe&&window.setTimeframe(\''+list[i]+'\')">'+list[i]+'</button>';
   }
-  h+='</div><div class="tz-badge">🌐 UTC+3</div></div>';
+  // Timestamps render as UTC throughout (see when()), so the chip states that
+  // rather than guessing at an offset.
+  h+='</div><div class="tz-badge">🌐 UTC</div></div>';
   return h;
 }
 
+/**
+ * The sidebar foot carries only what the page can actually observe. It used to
+ * print an uptime, a CPU percentage and a MAINNET pill that were all string
+ * literals — a console for a custody engine is the last place to show a number
+ * nobody measured. Environment comes from the API (setEngineEnv) and is simply
+ * absent until it answers.
+ */
+var ENGINE_ENV=null;
+function setEngineEnv(env){ENGINE_ENV=env?String(env):null;}
 function renderSidebarFooter(){
+  var envPill=ENGINE_ENV
+    ? '<div class="env-pill'+(/test|dev/i.test(ENGINE_ENV)?' testnet':'')+'"><span class="status-dot"></span><span>'+esc(ENGINE_ENV)+'</span></div>'
+    : '';
+  var dark=currentTheme()==='dark';
   return '<div class="side-foot">'+
-    '<div class="side-foot-item"><span class="dot blue"></span><span>v1.0.0</span></div>'+
-    '<div class="side-foot-item"><span class="dot green"></span><span style="color:#00e676;font-weight:600;">ONLINE 21d 3h</span></div>'+
-    '<div class="side-foot-item" style="font-size:11px;"><span style="color:#00e676;">CPU: 2.45%</span> <span style="color:#64748b;">|</span> <span style="color:#00e5ff;">RAM: 128MB</span></div>'+
-    '<div class="mainnet-pill"><span class="status-dot"></span><span>MAINNET</span></div>'+
+    '<button class="theme-toggle" onclick="toggleTheme()" title="Switch to '+(dark?'light':'dark')+' theme" aria-label="Switch to '+(dark?'light':'dark')+' theme">'+(dark?'☀️':'🌙')+'</button>'+
+    '<div class="side-foot-item"><span class="dot blue"></span><span>connected</span></div>'+
+    envPill+
     '</div>';
 }
 
+/**
+ * The overview's four headline cards. The vocabulary is the engine's — movements,
+ * deposits, payouts, held balances, assets, chains. It previously read "TOTAL
+ * ORDERS" and "payouts / donations", which are a merchant's words for a
+ * merchant's product; per ADR 0017 the engine does not have orders.
+ *
+ * A card renders only when its caller supplies a value, so a console that cannot
+ * answer "how many chains" shows three cards rather than a confident zero.
+ */
 function renderNexisCards(opts){
   opts=opts||{};
-  var ordersVal=opts.ordersVal!=null?String(opts.ordersVal):'0';
-  var amountVal=opts.amountVal!=null?String(opts.amountVal):'0.00 USD';
-  var currenciesVal=opts.currenciesVal!=null?String(opts.currenciesVal):'0';
-  var chainsVal=opts.chainsVal!=null?String(opts.chainsVal):'0';
+  var card=function(cls,icon,title,val,subs){
+    var h='<div class="nexis-card '+cls+'">'+
+      '<div class="nexis-card-head"><div class="icon-box">'+icon+'</div><span>'+esc(title)+'</span></div>'+
+      '<div class="nexis-card-val">'+esc(String(val))+'</div>';
+    for(var i=0;i<(subs||[]).length;i++){
+      var s=subs[i];
+      h+='<div class="nexis-sub-item"><div class="nexis-sub-title '+s.hue+'">'+esc(s.title)+'</div>'+
+         (s.desc?'<div class="nexis-sub-desc">'+esc(s.desc)+'</div>':'')+'</div>';
+    }
+    return h+'</div>';
+  };
 
-  var payCount=opts.paymentsCount!=null?String(opts.paymentsCount):'0';
-  var paySub=opts.paymentsSub||'0 paid, 0 pending, 0 expired';
-  var donCount=opts.donationsCount!=null?String(opts.donationsCount):'0';
-  var donSub=opts.donationsSub||'0 paid, 0 pending, 0 expired';
-
-  var payAmt=opts.paymentsAmount!=null?String(opts.paymentsAmount):'0.00 USD';
-  var donAmt=opts.donationsAmount!=null?String(opts.donationsAmount):'0.00 USD';
-
-  return '<div class="nexis-cards">'+
-    '<div class="nexis-card orders">'+
-      '<div class="nexis-card-head"><div class="icon-box">📊</div><span>TOTAL ORDERS</span></div>'+
-      '<div class="nexis-card-val">'+esc(ordersVal)+'</div>'+
-      '<div class="nexis-sub-item">'+
-        '<div class="nexis-sub-title cyan">'+esc(payCount)+' payments</div>'+
-        '<div class="nexis-sub-desc">'+esc(paySub)+'</div>'+
-      '</div>'+
-      '<div class="nexis-sub-item">'+
-        '<div class="nexis-sub-title orange">'+esc(donCount)+' payouts / donations</div>'+
-        '<div class="nexis-sub-desc">'+esc(donSub)+'</div>'+
-      '</div>'+
-    '</div>'+
-    '<div class="nexis-card amount">'+
-      '<div class="nexis-card-head"><div class="icon-box">💲</div><span>TOTAL AMOUNT (USD)</span></div>'+
-      '<div class="nexis-card-val">'+esc(amountVal)+'</div>'+
-      '<div class="nexis-sub-item">'+
-        '<div class="nexis-sub-title cyan">'+esc(payAmt)+' payments</div>'+
-      '</div>'+
-      '<div class="nexis-sub-item">'+
-        '<div class="nexis-sub-title orange">'+esc(donAmt)+' payouts / donations</div>'+
-      '</div>'+
-    '</div>'+
-    '<div class="nexis-card currencies">'+
-      '<div class="nexis-card-head"><div class="icon-box">👛</div><span>CURRENCIES</span></div>'+
-      '<div class="nexis-card-val">'+esc(currenciesVal)+'</div>'+
-      '<div class="nexis-sub-desc" style="margin-top:6px;font-weight:600;color:var(--purple)">SUPPORTED ASSETS</div>'+
-    '</div>'+
-    '<div class="nexis-card blockchains">'+
-      '<div class="nexis-card-head"><div class="icon-box">📦</div><span>BLOCKCHAINS</span></div>'+
-      '<div class="nexis-card-val">'+esc(chainsVal)+'</div>'+
-      '<div class="nexis-sub-desc" style="margin-top:6px;font-weight:600;color:var(--orange)">ACTIVE NETWORKS</div>'+
-    '</div>'+
-  '</div>';
+  var out='';
+  if(opts.movements!=null){
+    out+=card('cyan','📊','LEDGER MOVEMENTS',opts.movements,[
+      {hue:'cyan',title:(opts.depositCount||'0')+' deposits',desc:opts.depositSub||''},
+      {hue:'orange',title:(opts.payoutCount||'0')+' payouts',desc:opts.payoutSub||''}
+    ]);
+  }
+  if(opts.held!=null){
+    out+=card('green','💲','HELD FOR CUSTOMERS',opts.held,[
+      {hue:'cyan',title:(opts.inflow||'0')+' in',desc:''},
+      {hue:'orange',title:(opts.outflow||'0')+' out',desc:''}
+    ]);
+  }
+  if(opts.assets!=null){
+    out+=card('purple','👛','ASSETS',opts.assets,[{hue:'',title:'Supported by this deployment',desc:''}]);
+  }
+  if(opts.chains!=null){
+    out+=card('orange','📦','CHAINS',opts.chains,[{hue:'',title:'Routed by this deployment',desc:''}]);
+  }
+  return '<div class="nexis-cards">'+out+'</div>';
 }
 
 function buildDailyActivity(deposits, payouts){
@@ -348,11 +636,11 @@ function renderDailyActivityChart(daysData){
 
     bars+='<div class="bar-col">'+
       '<div class="bar-stack">'+
-        (hExp>0?'<div class="bar-seg expired" style="height:'+hExp+'px" title="Expired: '+(d.exp||0)+'"></div>':'')+
+        (hExp>0?'<div class="bar-seg expired" style="height:'+hExp+'px" title="Held / failed: '+(d.exp||0)+'"></div>':'')+
         (hPart>0?'<div class="bar-seg partial" style="height:'+hPart+'px" title="Partial: '+(d.part||0)+'"></div>':'')+
         (hPend>0?'<div class="bar-seg pending" style="height:'+hPend+'px" title="Pending: '+(d.pend||0)+'"></div>':'')+
-        (hDon>0?'<div class="bar-seg donations" style="height:'+hDon+'px" title="Payouts/Donations: '+(d.don||0)+'"></div>':'')+
-        (hPay>0?'<div class="bar-seg payments" style="height:'+hPay+'px" title="Payments: '+(d.pay||0)+'"></div>':'')+
+        (hDon>0?'<div class="bar-seg donations" style="height:'+hDon+'px" title="Payouts: '+(d.don||0)+'"></div>':'')+
+        (hPay>0?'<div class="bar-seg payments" style="height:'+hPay+'px" title="Deposits: '+(d.pay||0)+'"></div>':'')+
       '</div>'+
       '<div class="bar-label">'+esc(d.day)+'</div>'+
     '</div>';
@@ -360,13 +648,15 @@ function renderDailyActivityChart(daysData){
 
   return '<div class="chart-panel">'+
     '<div class="chart-header">'+
-      '<h3>Daily Activity (7 Days)</h3>'+
+      '<h3>Daily activity (7 days)</h3>'+
+      // Legend swatches read their colour from the same tokens as the bars, so
+      // the two cannot drift and both follow the theme.
       '<div class="chart-legend">'+
-        '<div class="legend-item"><span class="legend-dot" style="background:#00e676"></span><span>Payments</span></div>'+
-        '<div class="legend-item"><span class="legend-dot" style="background:#ff9100"></span><span>Payouts / Donations</span></div>'+
-        '<div class="legend-item"><span class="legend-dot" style="background:#2979ff"></span><span>Pending</span></div>'+
-        '<div class="legend-item"><span class="legend-dot" style="background:#76ff03"></span><span>Partial</span></div>'+
-        '<div class="legend-item"><span class="legend-dot" style="background:#64748b"></span><span>Expired</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--success))"></span><span>Deposits</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--warning))"></span><span>Payouts</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--primary))"></span><span>Pending</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--accent-lime))"></span><span>Partial</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--navy-300))"></span><span>Held / failed</span></div>'+
       '</div>'+
     '</div>'+
     '<div class="stacked-bars-container">'+bars+'</div>'+
@@ -576,7 +866,7 @@ function showToast(msg){
   var c=document.getElementById('toast-box');
   if(!c){c=document.createElement('div');c.id='toast-box';c.className='toast-container';document.body.appendChild(c);}
   var t=document.createElement('div');t.className='toast';
-  t.innerHTML='<span style="color:#2dd4bf;font-size:16px;">✓</span> <span>'+esc(msg)+'</span>';
+  t.innerHTML='<span style="color:rgb(var(--success));font-size:16px;">✓</span> <span>'+esc(msg)+'</span>';
   c.appendChild(t);
   setTimeout(function(){
     t.style.opacity='0';t.style.transform='translateY(10px)';t.style.transition='all 0.22s ease';

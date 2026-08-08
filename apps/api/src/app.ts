@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { assetRegistry } from "@cixtech/chain-config";
+import { assetRegistry, chainEnvOrNull } from "@cixtech/chain-config";
 import { UnsupportedChainError } from "@cixtech/chains";
 import { AppError, type ErrorSink, captureError } from "@cixtech/errors";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
@@ -11,10 +11,10 @@ import Fastify, {
   type FastifyRequest,
   type FastifyServerOptions,
 } from "fastify";
-import { registerAi } from "./ai/ai-routes.js";
 import { registerAdmin } from "./admin/admin-routes.js";
 import { AdminService } from "./admin/admin-service.js";
 import { SqlErrorSink } from "./admin/sql-error-sink.js";
+import { registerAi } from "./ai/ai-routes.js";
 import type { Engine } from "./engine.js";
 import { installMetrics } from "./metrics.js";
 import { registerPortal } from "./portal/portal-routes.js";
@@ -171,7 +171,8 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
         },
         {
           name: "ai",
-          description: "Natural language financial sub-ledger query engine, risk anomaly feed & autonomous agentic rules",
+          description:
+            "Natural language financial sub-ledger query engine, risk anomaly feed & autonomous agentic rules",
         },
         {
           name: "webhooks",
@@ -271,7 +272,11 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     tenantOf(req);
     // `assets` carries decimals because the ledger speaks integer base units:
     // without it a client cannot tell 4.34 USDT from 4,340,000 of them.
-    return { chains: engine.chains.chains(), assets };
+    // `env` is which network this deployment is pointed at (§16.5) — a console
+    // that shows balances must not leave the operator guessing. Absent rather
+    // than fatal when unset: a label must never take down a data route.
+    const env = chainEnvOrNull();
+    return { chains: engine.chains.chains(), assets, ...(env ? { env } : {}) };
   });
 
   // ── Tenant-scoped activity reads (feeds the portal + interactive docs) ────────

@@ -179,6 +179,10 @@ export const chainsSchema: FastifySchema = {
       type: "object",
       properties: {
         chains: { type: "array", items: { type: "string" } },
+        // Which network this deployment is pointed at (§16.5). testnet and
+        // mainnet are separate deployments, so this is fixed for the process —
+        // but a console showing balances should never have to guess which.
+        env: { type: "string", enum: ["testnet", "mainnet"] },
         // Amounts on every other endpoint are integer base units. Divide by
         // 10^decimals before showing one to a person.
         assets: {

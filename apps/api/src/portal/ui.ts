@@ -30,8 +30,14 @@ export const PORTAL_HTML = `<!doctype html>
 
 export const PORTAL_CSS = `
 ${UI_KIT_CSS}
-/* Tenant identity: teal. Everything else is the shared kit above. */
-:root{ --accent:#2dd4bf; --accent-hi:#5ce1d1; }
+/* Tenant identity: egofi's info sky, so the portal is distinguishable from the
+   admin console at a glance while staying inside one system. Everything else is
+   the shared kit above. */
+:root{ --accent:#0369A1; --accent-hi:#075985; --accent-fg:#fff; --accent-ink:#0369A1; }
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){ --accent:#0284C7; --accent-hi:#0EA5E9; --accent-ink:#38BDF8; }
+}
+:root[data-theme="dark"]{ --accent:#0284C7; --accent-hi:#0EA5E9; --accent-ink:#38BDF8; }
 .actions{white-space:nowrap}
 `;
 
@@ -91,7 +97,7 @@ ${UI_KIT_JS}
 
   var meta=null;
   function ensureMeta(){
-    if(!meta)meta=api('/v1/chains').then(function(d){setAssets(d.assets);return d;});
+    if(!meta)meta=api('/v1/chains').then(function(d){setAssets(d.assets);setEngineEnv(d.env);return d;});
     return meta;
   }
 
@@ -107,10 +113,12 @@ ${UI_KIT_JS}
       }
     }
 
+    // The pill reports that this page's own API calls are succeeding — which is
+    // all a browser can honestly attest to. It replaced a "Multi-Chain Node Sync
+    // 100%" literal that was never measured.
     var topbarHtml='<div class="topbar">'
       +'<div class="topbar-left">'
-      +'<div class="status-pill"><div class="status-dot"></div><span>Systems Operational</span></div>'
-      +'<div style="color:var(--muted);font-size:12px;">Multi-Chain Node Sync 100%</div>'
+      +'<div class="status-pill"><div class="status-dot"></div><span>API reachable</span></div>'
       +'</div>'
       +'<div class="row">'
       +renderTimeframeSwitcher('7 Days')
@@ -122,7 +130,7 @@ ${UI_KIT_JS}
     root.innerHTML='<div class="shell"><div class="side">'+
       '<div class="brand"><div class="mark">C</div><div><b>cixtech</b><small>tenant dashboard</small></div></div>'+
       navHtml+'<div class="spacer"></div>'+
-      '<button class="secondary" id="btn-self-help" style="margin-bottom:6px;background:rgba(0,229,255,0.1);border-color:rgba(0,229,255,0.3);color:var(--cyan);">💬 Help & Support</button>'+
+      '<button id="btn-self-help" style="margin-bottom:6px;">💬 Help &amp; support</button>'+
       '<a class="nav" href="/docs" target="_blank">'+navIcon('audit')+'<span>API docs ↗</span></a>'+
       '<button data-logout style="margin-bottom:8px;">Sign out</button>'+
       renderSidebarFooter()+'</div>'+
@@ -156,9 +164,9 @@ ${UI_KIT_JS}
     openModal('Help & Support Diagnostics',bodyHtml,'<button class="primary" data-close>Close</button>',function(el){
       el.querySelector('#btn-run-diag').onclick=function(){
         var statusEl=el.querySelector('#help-diag-status');
-        statusEl.innerHTML='<span style="color:#ff9100;">Running diagnostics…</span>';
+        statusEl.innerHTML='<span class="muted">Running diagnostics…</span>';
         Promise.all([api('/v1/chains'),api('/v1/proof-of-reserves')]).then(function(res){
-          statusEl.innerHTML='<div class="secretbox" style="color:#00e676;border-color:rgba(0,230,118,0.4);">'
+          statusEl.innerHTML='<div class="banner ok">'
             +'✓ <b>API Key Authenticated:</b> Valid tenant key<br>'
             +'✓ <b>Multi-Chain Router:</b> '+res[0].chains.length+' active networks<br>'
             +'✓ <b>Solvency Backup:</b> 105.00% coverage verified<br>'
@@ -218,16 +226,16 @@ ${UI_KIT_JS}
       var failedPay = payouts.filter(function(x){ return x.status === 'failed'; }).length;
 
       var nexisCardsHtml = renderNexisCards({
-        ordersVal: num(deposits.length + payouts.length),
-        amountVal: totalBalStr,
-        currenciesVal: num(chainsRes.assets ? chainsRes.assets.length : balances.length),
-        chainsVal: num(chainsRes.chains ? chainsRes.chains.length : 5),
-        paymentsCount: num(deposits.length),
-        paymentsSub: finalizedDep + ' finalized, ' + pendingDep + ' pending, ' + quadDep + ' held',
-        donationsCount: num(payouts.length),
-        donationsSub: settledPay + ' settled, ' + pendingPay + ' locked/pending, ' + failedPay + ' failed',
-        paymentsAmount: deposits.length + ' incoming',
-        donationsAmount: payouts.length + ' outgoing'
+        movements: num(deposits.length + payouts.length),
+        held: totalBalStr,
+        assets: num(chainsRes.assets ? chainsRes.assets.length : balances.length),
+        chains: chainsRes.chains ? num(chainsRes.chains.length) : null,
+        depositCount: num(deposits.length),
+        depositSub: finalizedDep + ' finalized, ' + pendingDep + ' pending, ' + quadDep + ' held',
+        payoutCount: num(payouts.length),
+        payoutSub: settledPay + ' settled, ' + pendingPay + ' locked/pending, ' + failedPay + ' failed',
+        inflow: deposits.length,
+        outflow: payouts.length
       });
 
       var dailyActivityData = buildDailyActivity(deposits, payouts);
@@ -630,7 +638,7 @@ ${UI_KIT_JS}
         api('/v1/ai/query',{method:'POST',body:JSON.stringify({prompt:p})})
           .then(function(r){
             var card=document.getElementById('ai-response-card');
-            card.innerHTML='<div class="secretbox" style="color:#2dd4bf;border-color:rgba(45,212,191,0.4);"><b style="color:#fff;">🤖 AI Assistant ('+Math.round(r.response.confidenceScore*100)+'% Confidence):</b><p style="margin:8px 0 0;font-size:14px;color:#e8eef6;">'+esc(r.response.answer)+'</p></div>';
+            card.innerHTML='<div class="panel" style="margin:0;"><h3>🤖 Assistant · '+Math.round(r.response.confidenceScore*100)+'% confidence</h3><p style="margin:0;padding:16px 20px;">'+esc(r.response.answer)+'</p></div>';
           })
           .catch(function(e){flash={cls:'bad',msg:friendly(e)};views.ai();});
       };
@@ -648,6 +656,7 @@ ${UI_KIT_JS}
     }).catch(fail);
   };
 
+  initTheme();
   render();
 })();
 `;

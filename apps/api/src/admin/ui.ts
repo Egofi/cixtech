@@ -131,7 +131,7 @@ ${UI_KIT_JS}
     }
 
     root.innerHTML='<div class="shell"><div class="side">'+
-      '<div class="brand"><div class="mark">C</div><div><b>CIXTECH GATEWAY</b><small>super-admin console</small></div></div>'+
+      '<div class="brand"><div class="mark">C</div><div><b>cixtech</b><small>super-admin console</small></div></div>'+
       navHtml+'<div class="spacer"></div>'+
       '<button data-logout style="margin-bottom:8px;">Sign out</button>'+
       renderSidebarFooter()+'</div>'+
@@ -142,7 +142,7 @@ ${UI_KIT_JS}
   }
 
   function renderLogin(){
-    root.innerHTML='<div class="login"><div class="mark">C</div><h1>CIXTECH GATEWAY</h1><p>Enter the super-admin token to continue.</p><input id="tok" type="password" placeholder="Admin token" autocomplete="off"><button class="primary" id="go">Sign in</button><div class="err" id="le"></div></div>';
+    root.innerHTML='<div class="login"><div class="mark">C</div><h1>cixtech</h1><p>Enter the super-admin token to continue.</p><input id="tok" type="password" placeholder="Admin token" autocomplete="off"><button class="primary" id="go">Sign in</button><div class="err" id="le"></div></div>';
     var go=function(){var v=document.getElementById('tok').value.trim();if(!v)return;localStorage.setItem(TK,v);token=v;api('/admin/api/overview').then(function(){view='overview';render();}).catch(function(e){document.getElementById('le').textContent=e.message;localStorage.removeItem(TK);token=null;});};
     document.getElementById('go').onclick=go;
     document.getElementById('tok').addEventListener('keydown',function(e){if(e.key==='Enter')go();});

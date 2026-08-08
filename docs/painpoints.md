@@ -1,3 +1,18 @@
+> [!WARNING]
+> **Withdrawn — this document describes egofi, not cixtech.**
+>
+> It recasts the custody engine as a merchant-facing payment product, which
+> contradicts the build spec's founding separation ("the engine knows nothing
+> about invoices, checkouts or merchants") and non-negotiable principle 7. The
+> code written from it was removed; see
+> [ADR 0017](adr/0017-engine-scope-boundary.md).
+>
+> The thinking here is not wrong — it is filed in the wrong repo. Its home is
+> egofi, which owns merchants, orders and fiat. Kept for that history only; do
+> not build from it here.
+
+---
+
 **The biggest pain points for merchants using crypto payment gateways center on operational friction, financial risks, poor user experience (for both merchants and customers), compliance burdens, and reliability issues.** These emerge consistently across reviews, forums (e.g., Reddit, Trustpilot), articles, merchant surveys, and discussions on X. While crypto offers benefits like lower decline rates, no traditional chargebacks, and global reach, gateways often fail to deliver seamless, predictable experiences comparable to fiat systems like Stripe or traditional processors.
 
 Here’s a breakdown of the most reported issues, drawn from deep research into merchant feedback, comparisons, and analyses:

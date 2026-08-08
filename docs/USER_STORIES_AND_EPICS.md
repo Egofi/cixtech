@@ -1,3 +1,18 @@
+> [!WARNING]
+> **Withdrawn — this document describes egofi, not cixtech.**
+>
+> It recasts the custody engine as a merchant-facing payment product, which
+> contradicts the build spec's founding separation ("the engine knows nothing
+> about invoices, checkouts or merchants") and non-negotiable principle 7. The
+> code written from it was removed; see
+> [ADR 0017](adr/0017-engine-scope-boundary.md).
+>
+> The thinking here is not wrong — it is filed in the wrong repo. Its home is
+> egofi, which owns merchants, orders and fiat. Kept for that history only; do
+> not build from it here.
+
+---
+
 # User Stories & Epic Backlog
 ## Project Name: CIXTech End-to-End Crypto Financial Operating System (OS)
 **Document Version:** 1.0  

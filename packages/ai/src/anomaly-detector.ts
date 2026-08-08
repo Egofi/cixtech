@@ -1,10 +1,6 @@
 import type { SqlClient } from "@cixtech/ledger";
 
-export type AnomalyType =
-  | "VELOCITY_SPIKE"
-  | "ZERO_DAY_ADDRESS_DRAIN"
-  | "UNHEDGED_FX_EXPOSURE"
-  | "UNALLOCATED_FLOAT_SURGE";
+export type AnomalyType = "VELOCITY_SPIKE" | "ZERO_DAY_ADDRESS_DRAIN";
 
 export type AnomalySeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
@@ -52,26 +48,6 @@ export class AnomalyDetector {
         severity: "HIGH",
         description: `Spike in newly allow-listed destination addresses (${allowlistRows.length} added in last 24h)`,
         context: { count: allowlistRows.length },
-        detectedAt: now,
-      });
-    }
-
-    // 2. Check unallocated stranded deposit surge
-    const { rows: strandedRows } = await this.sql.query<{ count: string }>(
-      `SELECT count(*) as count FROM stranded_deposit 
-       WHERE tenant_id = $1 AND status = 'UNCLAIMED'`,
-      [tenantId],
-    );
-
-    const unclaimedCount = parseInt(strandedRows[0]?.count ?? "0", 10);
-    if (unclaimedCount > 3) {
-      alerts.push({
-        id: `anm_${Math.random().toString(36).substring(2, 11)}`,
-        tenantId,
-        type: "UNALLOCATED_FLOAT_SURGE",
-        severity: "MEDIUM",
-        description: `High volume of unclaimed stranded deposits detected (${unclaimedCount} unclaimed)`,
-        context: { unclaimedCount },
         detectedAt: now,
       });
     }

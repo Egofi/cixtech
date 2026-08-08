@@ -84,9 +84,9 @@ ${UI_KIT_JS}
   function chainOptions(chains){var h='';for(var i=0;i<chains.length;i++)h+='<option>'+esc(chains[i])+'</option>';return h;}
 
   var NAV_GROUPS=[
-    {title:'ANALYTICS',cls:'cyan-title',items:[['overview','Statistics / Overview'],['accounting','Accounting & ERP'],['ai','AI Assistant & Risk']]},
-    {title:'WIDGETS',cls:'cyan-title',items:[['accounts','Accounts'],['deposits','Deposits'],['payouts','Payouts'],['por_pos','PoR & Retail POS']]},
-    {title:'SETTINGS',cls:'purple-title',items:[['allowlist','Allow-list'],['webhooks','Webhooks']]}
+    {title:'OVERVIEW',items:[['overview','Statistics / Overview'],['ai','AI Assistant & Risk']]},
+    {title:'LEDGER',items:[['accounts','Accounts'],['deposits','Deposits'],['payouts','Payouts']]},
+    {title:'SETTINGS',items:[['allowlist','Allow-list'],['webhooks','Webhooks']]}
   ];
 
   var meta=null;
@@ -100,7 +100,7 @@ ${UI_KIT_JS}
     var navHtml='';
     for(var g=0;g<NAV_GROUPS.length;g++){
       var grp=NAV_GROUPS[g];
-      navHtml+='<div class="nav-group-title '+grp.cls+'"><span>'+grp.title+'</span></div>';
+      navHtml+='<div class="nav-group-title"><span>'+grp.title+'</span></div>';
       for(var i=0;i<grp.items.length;i++){
         var item=grp.items[i];
         navHtml+='<div class="nav'+(item[0]===view?' active':'')+'" data-nav="'+item[0]+'">'+navIcon(item[0])+'<span>'+item[1]+'</span></div>';
@@ -114,14 +114,13 @@ ${UI_KIT_JS}
       +'</div>'
       +'<div class="row">'
       +renderTimeframeSwitcher('7 Days')
-      +'<button id="top-btn-pos" style="background:rgba(0,229,255,0.12);color:var(--cyan);border-color:rgba(0,229,255,0.3);font-size:12px;">💳 POS Terminal</button>'
       +'<button id="top-btn-payout" style="font-size:12px;">⚡ Dispatch Payout</button>'
       +'<button id="top-btn-docs" onclick="window.open(\'/docs\',\'_blank\')" style="font-size:12px;">📘 API Specs</button>'
       +'</div>'
       +'</div>';
 
     root.innerHTML='<div class="shell"><div class="side">'+
-      '<div class="brand"><div class="mark">C</div><div><b>CIXTECH GATEWAY</b><small>tenant dashboard</small></div></div>'+
+      '<div class="brand"><div class="mark">C</div><div><b>cixtech</b><small>tenant dashboard</small></div></div>'+
       navHtml+'<div class="spacer"></div>'+
       '<button class="secondary" id="btn-self-help" style="margin-bottom:6px;background:rgba(0,229,255,0.1);border-color:rgba(0,229,255,0.3);color:var(--cyan);">💬 Help & Support</button>'+
       '<a class="nav" href="/docs" target="_blank">'+navIcon('audit')+'<span>API docs ↗</span></a>'+
@@ -132,13 +131,12 @@ ${UI_KIT_JS}
     root.querySelectorAll('[data-nav]').forEach(function(n){n.onclick=function(){view=n.getAttribute('data-nav');render();};});
     root.querySelector('[data-logout]').onclick=logout;
     root.querySelector('#btn-self-help').onclick=openHelpModal;
-    root.querySelector('#top-btn-pos').onclick=function(){view='por_pos';render();};
     root.querySelector('#top-btn-payout').onclick=function(){view='payouts';render();};
     ensureMeta().then(function(){views[view]();}).catch(fail);
   }
 
   function renderLogin(){
-    root.innerHTML='<div class="login"><div class="mark">C</div><h1>CIXTECH GATEWAY</h1><p>Sign in with your tenant API key — the <span class="mono">cxk_…</span> value issued when your account was created.</p><input id="tok" type="password" placeholder="cxk_…" autocomplete="off"><button class="primary" id="go">Sign in</button><div class="err" id="le"></div></div>';
+    root.innerHTML='<div class="login"><div class="mark">C</div><h1>cixtech</h1><p>Sign in with your tenant API key — the <span class="mono">cxk_…</span> value issued when your account was created.</p><input id="tok" type="password" placeholder="cxk_…" autocomplete="off"><button class="primary" id="go">Sign in</button><div class="err" id="le"></div></div>';
     var go=function(){var v=document.getElementById('tok').value.trim();if(!v)return;key=v;api('/v1/accounts').then(function(){localStorage.setItem(TK,v);view='overview';render();}).catch(function(e){key=null;document.getElementById('le').textContent=e.message;});};
     document.getElementById('go').onclick=go;
     document.getElementById('tok').addEventListener('keydown',function(e){if(e.key==='Enter')go();});
@@ -146,10 +144,10 @@ ${UI_KIT_JS}
 
   function openHelpModal(){
     var bodyHtml='<div style="font-size:13.5px;line-height:1.6;">'
-      +'<h4 style="margin:0 0 8px;color:#fff;">Frequently Asked Questions</h4>'
-      +'<details style="margin-bottom:8px;background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:8px;"><summary style="cursor:pointer;font-weight:600;color:var(--cyan);">How long is the allow-list cooldown window?</summary><p style="margin:6px 0 0;color:#cbd5e1;">All newly added payout addresses undergo a 24-hour security delay before payouts can be dispatched. This prevents single-session wallet drain attacks.</p></details>'
-      +'<details style="margin-bottom:8px;background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:8px;"><summary style="cursor:pointer;font-weight:600;color:var(--cyan);">How do customers recover wrong-network deposits?</summary><p style="margin:6px 0 0;color:#cbd5e1;">Direct customers to <span class="mono">/checkout/:intentId</span> and click "Claim Stranded Deposit". The recovery engine verifies block ownership and refunds net assets.</p></details>'
-      +'<details style="margin-bottom:14px;background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:8px;"><summary style="cursor:pointer;font-weight:600;color:var(--cyan);">What is the Solvency Coverage Invariant?</summary><p style="margin:6px 0 0;color:#cbd5e1;">CIXTech maintains a 1:1 asset-to-liability backing ($\sum \text{Assets} \ge \sum \text{Liabilities}$). Check live proofs on the "PoR & Retail POS" tab.</p></details>'
+      +'<h4>Frequently asked questions</h4>'
+      +'<details class="faq"><summary>How long is the allow-list cool-down?</summary><p>A newly allow-listed payout address serves a 24-hour delay before it can receive anything. It is what stops a single compromised session from draining an account.</p></details>'
+      +'<details class="faq"><summary>Why did my payout come back as 202 rather than 200?</summary><p>It cleared policy but sits over the dual-control threshold. Approve it with a second, <span class="mono">approve</span>-scoped key at <span class="mono">POST /v1/withdrawals/{id}/approve</span>.</p></details>'
+      +'<details class="faq"><summary>What is the solvency invariant?</summary><p>Per asset, pooled + treasury + cold + gas-float assets must cover every liability the ledger records. Drift freezes withdrawals rather than failing open.</p></details>'
       +'<h4 style="margin:12px 0 8px;color:#fff;">Self-Service Diagnostics</h4>'
       +'<div id="help-diag-status" style="margin-bottom:12px;">Click below to run automated platform health checks.</div>'
       +'<button class="primary" id="btn-run-diag">Run Platform Diagnostic Check</button>'
@@ -573,90 +571,6 @@ ${UI_KIT_JS}
     }).catch(fail);
   };
 
-  views.accounting=function(){
-    var statGrid = renderStatGrid([
-      ['GAAP / IFRS CODES', '1000 - 5000', 'Standard trial balance export', '📊', 'cyan'],
-      ['ERP CONNECTORS', 'Active', 'QuickBooks, Xero, NetSuite', '🔗', 'purple'],
-      ['REFUND ENGINE', 'US-RFD-01', 'Sub-minute automated refunds', '⚡', 'green'],
-      ['REFUND SLA', '< 60 Seconds', 'Automated gas fee calculation', '⏱️', 'orange']
-    ]);
-
-    var exportForm='<div class="form">'
-      +'<label>Format<select id="acc-fmt">'
-      +'<option value="quickbooks">QuickBooks CSV</option>'
-      +'<option value="xero">Xero CSV</option>'
-      +'<option value="mt940">SWIFT MT940</option>'
-      +'<option value="camt053">CAMT.053 XML</option>'
-      +'<option value="json">GAAP JSON</option>'
-      +'</select></label>'
-      +'<button class="primary" id="btn-export">Download General Ledger Export 📥</button></div>'
-      +'<p class="hint">Export trial balance mapped to standard GAAP/IFRS 4-digit GL codes (1000 Assets, 2000 Liabilities, 4000 Revenue, 5000 Expense).</p>';
-
-    var erpForm='<div class="form">'
-      +'<label>ERP Connector<select id="erp-tgt">'
-      +'<option value="QUICKBOOKS_ONLINE">QuickBooks Online</option>'
-      +'<option value="XERO">Xero</option>'
-      +'<option value="NETSUITE">NetSuite</option>'
-      +'</select></label>'
-      +'<button class="primary" id="btn-sync">Trigger Automated ERP Sync 🔄</button></div>'
-      +'<p class="hint">Posts closed sub-ledger trial balance entries directly to your accounting software.</p>';
-
-    var refundPanel='<div class="form">'
-      +'<label>Merchant Account<select id="rfd-acc"></select></label>'
-      +'<label>Chain<select id="rfd-chn"><option>TRON</option><option>POLYGON</option><option>ARBITRUM</option></select></label>'
-      +'<label>Asset<input id="rfd-ast" value="USDT" size="8"></label>'
-      +'<label>Gross Amount<input id="rfd-amt" placeholder="e.g. 15.00" size="12"></label>'
-      +'<label>Refund Reason<select id="rfd-rsn"><option value="OVERPAYMENT">Overpayment</option><option value="EXPIRED_INTENT">Expired Intent</option><option value="CUSTOMER_REQUEST">Customer Request</option></select></label>'
-      +'<label>Destination Address<input id="rfd-dst" placeholder="Customer address" size="32"></label>'
-      +'<button class="primary" id="btn-do-refund">Process Automated Refund ⚡</button></div>'
-      +'<p class="hint">Dispatches sub-minute customer refund with automatic gas fee calculation (< 60 seconds).</p>';
-
-    main('<div class="head"><h2>Sub-Ledger Accounting & ERP Integration</h2><div class="row">'+renderTimeframeSwitcher('7 Days')+'</div></div>'+statGrid+panel('GAAP / IFRS Trial Balance Exporter',exportForm)+panel('Automated ERP Sync Connector',erpForm)+panel('Sub-Minute Automated Customer Refund Engine (US-RFD-01)',refundPanel));
-
-    api('/v1/accounts').then(function(d){
-      var sel=document.getElementById('rfd-acc');
-      if(sel)sel.innerHTML=accountOptions(d.accounts);
-    });
-
-    document.getElementById('btn-export').onclick=function(){
-      var fmt=document.getElementById('acc-fmt').value;
-      window.open('/v1/accounting/export?format='+fmt+'&key='+encodeURIComponent(key),'_blank');
-      flash={cls:'ok',msg:'Generated GL Export in '+fmt.toUpperCase()+' format.'};
-      render();
-    };
-
-    document.getElementById('btn-sync').onclick=function(){
-      var tgt=document.getElementById('erp-tgt').value;
-      api('/v1/accounting/erp-sync',{method:'POST',body:JSON.stringify({target:tgt})})
-        .then(function(r){
-          flash={cls:'ok',msg:'Synced '+r.sync.journalEntriesSynced+' journal entries to '+tgt+' ('+r.sync.totalDebitFormatted+' USDT debited).'};
-          views.accounting();
-        })
-        .catch(function(e){flash={cls:'bad',msg:friendly(e)};views.accounting();});
-    };
-
-    document.getElementById('btn-do-refund').onclick=function(){
-      var acc=document.getElementById('rfd-acc').value,
-          chn=document.getElementById('rfd-chn').value,
-          ast=document.getElementById('rfd-ast').value.trim().toUpperCase(),
-          amtTyped=document.getElementById('rfd-amt').value.trim(),
-          rsn=document.getElementById('rfd-rsn').value,
-          dst=document.getElementById('rfd-dst').value.trim();
-
-      if(!acc||!amtTyped||!dst){flash={cls:'warn',msg:'Account, amount, and destination address are required.'};views.accounting();return;}
-      var amtBase=toBaseUnits(amtTyped,ast);
-      if(!amtBase){flash={cls:'warn',msg:'Invalid amount.'};views.accounting();return;}
-
-      api('/v1/refunds',{method:'POST',body:JSON.stringify({merchantId:acc,chain:chn,asset:ast,amountBaseUnits:amtBase,destinationAddress:dst,reason:rsn,sponsorGas:true})})
-        .then(function(r){
-          var rf=r.refund;
-          flash={cls:'ok',msg:'Refund dispatched! ID: '+rf.id+' ('+rf.netAmountBaseUnits+' base units sent).'};
-          views.accounting();
-        })
-        .catch(function(e){flash={cls:'bad',msg:friendly(e)};views.accounting();});
-    };
-  };
-
   views.ai=function(){
     Promise.all([api('/v1/ai/anomalies'),api('/v1/ai/rules')]).then(function(res){
       var anomalies=res[0].anomalies||[];
@@ -730,99 +644,6 @@ ${UI_KIT_JS}
         api('/v1/ai/rules',{method:'POST',body:JSON.stringify({name:name,conditionType:cond,conditionThreshold:thresh,action:act})})
           .then(function(){flash={cls:'ok',msg:'Created autonomous rule "'+name+'".'};views.ai();})
           .catch(function(e){flash={cls:'bad',msg:friendly(e)};views.ai();});
-      };
-    }).catch(fail);
-  };
-
-  views.por_pos=function(){
-    Promise.all([api('/v1/proof-of-reserves'),api('/v1/accounts')]).then(function(res){
-      var por=res[0].proofOfReserves;
-      var accounts=res[1].accounts;
-      var statGrid = renderStatGrid([
-        ['SOLVENCY COVERAGE', por.coverageRatioPercentage, por.isSolvent ? '1:1 Fully Solvent' : 'Insolvent Alert', '⚖️', por.isSolvent ? 'green' : 'bad'],
-        ['TOTAL ASSETS', num(por.totalAssetsBaseUnits) + ' base', 'On-chain reserve balance', '🏦', 'cyan'],
-        ['TOTAL LIABILITIES', num(por.totalLiabilitiesBaseUnits) + ' base', 'Owed to merchant accounts', '📜', 'purple'],
-        ['MERKLE TREE ROOT', short(por.merkleTreeRootHash), 'Cryptographic proof hash', '🔐', 'green']
-      ]);
-
-      var porPanel='<div class="kv" style="padding:16px;">'
-        +'<dt>Solvency Coverage</dt><dd><b>'+esc(por.coverageRatioPercentage)+'</b> '+(por.isSolvent?badge('1:1 SOLVENT','ok'):badge('INSOLVENT','bad'))+'</dd>'
-        +'<dt>Total Assets</dt><dd>'+esc(num(por.totalAssetsBaseUnits))+' base units</dd>'
-        +'<dt>Total Liabilities</dt><dd>'+esc(num(por.totalLiabilitiesBaseUnits))+' base units</dd>'
-        +'<dt>Merkle Tree Root Hash</dt><dd class="mono">'+esc(por.merkleTreeRootHash)+'</dd>'
-        +'<dt>Cryptographic Signature</dt><dd class="mono">'+esc(por.signature)+'</dd>'
-        +'</div>';
-
-      var posForm='<div class="form">'
-        +'<label>Merchant Account<select id="pos-acc">'+accountOptions(accounts)+'</select></label>'
-        +'<label>Terminal ID<input id="pos-term" value="TERM_MAIN_01" size="14"></label>'
-        +'<label>Fiat Amount<input id="pos-amt" value="15.50" size="10"></label>'
-        +'<label>Currency<select id="pos-cur"><option value="USD">USD ($)</option><option value="EUR">EUR (€)</option><option value="NGN">NGN (₦)</option><option value="KES">KES (KSh)</option></select></label>'
-        +'<label>Chain<select id="pos-chn"><option value="TRON">TRON</option><option value="POLYGON">POLYGON</option><option value="ARBITRUM">ARBITRUM</option></select></label>'
-        +'<button class="primary" id="btn-gen-pos">Generate POS Payment QR 📱</button></div>'
-        +'<div id="pos-result-card" style="margin-top:16px;"></div>';
-
-      main('<div class="head"><h2>Proof of Reserves & Retail POS</h2><div class="row">'+renderTimeframeSwitcher('7 Days')+'</div></div>'
-        +statGrid
-        +panel('Cryptographic Proof of Reserves (1:1 Solvency Verifier)',porPanel)
-        +panel('Point-of-Sale Dynamic QR Generator',posForm));
-
-      document.getElementById('btn-gen-pos').onclick=function(){
-        var acc=document.getElementById('pos-acc').value,
-            term=document.getElementById('pos-term').value.trim(),
-            amt=document.getElementById('pos-amt').value.trim(),
-            cur=document.getElementById('pos-cur').value,
-            chn=document.getElementById('pos-chn').value;
-        if(!acc||!amt){flash={cls:'warn',msg:'Account and amount are required.'};views.por_pos();return;}
-        api('/v1/pos/qr',{method:'POST',body:JSON.stringify({merchantId:acc,terminalId:term,fiatAmount:amt,fiatCurrency:cur,chain:chn})})
-          .then(function(r){
-            var s=r.posSession;
-            var card=document.getElementById('pos-result-card');
-            card.innerHTML='<div class="panel" style="margin-top:16px;background:rgba(255,255,255,0.02);">'
-              +'<h3 style="color:#2dd4bf;">Active POS Checkout Session: '+esc(s.id)+'</h3>'
-              +'<div class="qrwrap" style="padding:18px;">'
-              +'<div><div class="qrbox"><canvas id="pos-qr-canvas"></canvas></div></div>'
-              +'<div class="qrside">'
-              +'<div class="kv">'
-              +'<dt>Amount Due</dt><dd><b>'+esc(s.fiatAmount)+' '+esc(s.fiatCurrency)+'</b> ('+esc(s.chain)+' Network)</dd>'
-              +'<dt>Terminal Ref</dt><dd>'+esc(s.terminalId)+'</dd>'
-              +'<dt>Payment Address</dt><dd class="mono" style="word-break:break-all;">'+esc(s.paymentAddress)+'</dd>'
-              +'<dt>QR URI Payload</dt><dd class="mono" style="font-size:11px;word-break:break-all;">'+esc(s.qrPayloadUri)+'</dd>'
-              +'</div>'
-              +'<div class="btnrow">'
-              +'<button class="primary" id="btn-pos-copy">Copy Address</button>'
-              +'<button id="btn-pos-print">🖨️ Print Thermal Receipt</button>'
-              +'</div>'
-              +'</div></div></div>';
-
-            var canvas=document.getElementById('pos-qr-canvas');
-            try{
-              var matrix=QR.encode(s.qrPayloadUri);
-              QR.draw(canvas,matrix,7);
-            }catch(e){
-              if(canvas&&canvas.parentNode)canvas.parentNode.innerHTML='<div class="empty">QR code preview ready</div>';
-            }
-
-            document.getElementById('btn-pos-copy').onclick=function(){copyText(s.paymentAddress,this);};
-            document.getElementById('btn-pos-print').onclick=function(){
-              var printWin=window.open('','_blank','width=400,height=600');
-              printWin.document.write('<html><head><title>Thermal Receipt</title><style>body{font-family:monospace;padding:20px;width:280px;margin:0 auto;} h2{text-align:center;margin:0 0 10px;} .hr{border-bottom:1px dashed #000;margin:10px 0;} .row{display:flex;justify-content:space-between;margin:4px 0;}</style></head><body>'
-                +'<h2>'+esc(s.thermalReceiptSpec.storeHeader)+'</h2>'
-                +'<div class="hr"></div>'
-                +'<div class="row"><span>Terminal:</span><span>'+esc(s.terminalId)+'</span></div>'
-                +'<div class="row"><span>Ref:</span><span>'+esc(s.id)+'</span></div>'
-                +'<div class="row"><span>Amount:</span><span><b>'+esc(s.thermalReceiptSpec.amountDue)+'</b></span></div>'
-                +'<div class="hr"></div>'
-                +'<p style="word-break:break-all;font-size:11px;">Pay to: '+esc(s.paymentAddress)+'</p>'
-                +'<div class="hr"></div>'
-                +'<p style="text-align:center;font-size:10px;">Powered by CIXTech Crypto Financial OS</p>'
-                +'</body></html>');
-              printWin.document.close();
-              printWin.focus();
-              setTimeout(function(){printWin.print();},300);
-            };
-          })
-          .catch(function(e){flash={cls:'bad',msg:friendly(e)};views.por_pos();});
       };
     }).catch(fail);
   };

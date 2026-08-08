@@ -41,9 +41,6 @@ const TENANT_TABLES: readonly TenantTable[] = [
   { table: "payout_allowlist", column: "tenant" },
   { table: "payout_intent", column: "tenant" },
   { table: "payout_approval", column: "tenant" },
-  { table: "payment_intent", column: "tenant_id" },
-  { table: "stranded_deposit", column: "tenant_id" },
-  { table: "refund", column: "tenant_id" },
   { table: "agent_rule", column: "tenant_id" },
   { table: "ai_anomaly_log", column: "tenant_id" },
   // ADR 0011 toggle. A chain-wide default row carries tenant='' and must stay

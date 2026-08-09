@@ -48,6 +48,28 @@ describe("a chain that cannot resolve its tokens must not register", () => {
     expect(router.has("BASE")).toBe(true);
   });
 
+  /**
+   * .env.example lists every chain with an empty value, so the file is a full
+   * inventory rather than a guessing game. That only works if an empty value
+   * reads as "not configured" — otherwise copying the template to .env would
+   * arm every chain at once and the engine would refuse to boot on the first
+   * missing token address.
+   */
+  it("treats an empty RPC URL as not configured, not as a broken chain", () => {
+    const env = {
+      ...baseEnv(),
+      POLYGON_RPC_URL: "",
+      POLYGON_USDC_ADDRESS: "",
+      POLYGON_USDT_ADDRESS: "",
+      BASE_RPC_URL: "https://base.example",
+      BASE_USDC_ADDRESS: "0x1111111111111111111111111111111111111111",
+      BASE_USDT_ADDRESS: "0x2222222222222222222222222222222222222222",
+    };
+    const { chains, skipped } = buildRouter(env, sql);
+    expect(chains).toEqual(["BASE"]);
+    expect(skipped.find((s) => s.chain === "POLYGON")?.reason).toMatch(/POLYGON_RPC_URL/);
+  });
+
   it("leaves a chain alone when it has no RPC URL at all", () => {
     const env = {
       ...baseEnv(),

@@ -96,3 +96,6 @@ Enforced continuously; a drift freezes withdrawals. See `packages/ledger`.
 
 **Nothing in later steps may move value until every property in
 `packages/ledger/test` is green.**
+
+
+https://claude.ai/code/artifact/c316634a-4081-4754-8c78-2e58f355ae3d

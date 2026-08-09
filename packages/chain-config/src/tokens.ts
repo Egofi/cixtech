@@ -44,6 +44,9 @@ const EVM_TOKENS: Record<string, Record<string, TokenConfig>> = {
   BSC: evmTokens("BSC", "BNB"),
   ARBITRUM: evmTokens("ARBITRUM", "ETH"),
   BASE: evmTokens("BASE", "ETH"),
+  ETHEREUM: evmTokens("ETHEREUM", "ETH"),
+  AVALANCHE: evmTokens("AVALANCHE", "AVAX"),
+  OPTIMISM: evmTokens("OPTIMISM", "ETH"),
 };
 
 const TOKENS: Record<ChainEnv, Record<string, Record<string, TokenConfig>>> = {

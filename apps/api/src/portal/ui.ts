@@ -59,7 +59,10 @@ ${UI_KIT_JS}
 
   function api(path,opts){
     opts=opts||{};
-    opts.headers=Object.assign({'x-api-key':key,'content-type':'application/json'},opts.headers||{});
+    // See the admin console: a content-type with no body is rejected outright.
+    var base={'x-api-key':key};
+    if(opts.body!=null)base['content-type']='application/json';
+    opts.headers=Object.assign(base,opts.headers||{});
     return fetch(path,opts).then(function(r){
       if(r.status===401){logout();throw new Error('Unauthorized');}
       return r.text().then(function(t){

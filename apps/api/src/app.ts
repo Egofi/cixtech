@@ -111,6 +111,40 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     // stripping them — a wrong field name should fail loudly, not vanish.
     ajv: { customOptions: { removeAdditional: false } },
   });
+  /**
+   * An empty body with a JSON content-type parses to "no body" rather than being
+   * rejected.
+   *
+   * Several mutations here take no body at all — releasing the kill-switch,
+   * issuing a key, replaying a delivery — and the ones that do take a body treat
+   * it as optional (`req.body ?? {}`). Fastify's default parser refuses the
+   * combination outright, so any client that sets a JSON content-type once and
+   * reuses it for every call (both of our consoles did) could engage the
+   * kill-switch but never release it. A safety control that only latches one way
+   * is worse than no control, and that is a contract the engine owes every
+   * tenant's HTTP client, not just our own pages.
+   *
+   * Malformed JSON is still a hard 400 — this widens what counts as an empty
+   * body, not what counts as valid JSON.
+   */
+  app.addContentTypeParser<string>(
+    "application/json",
+    { parseAs: "string" },
+    (_req, body, done) => {
+      if (body === undefined || body === null || String(body).trim() === "") {
+        done(null, undefined);
+        return;
+      }
+      try {
+        done(null, JSON.parse(String(body)));
+      } catch {
+        const err = new Error("Body is not valid JSON") as Error & { statusCode: number };
+        err.statusCode = 400;
+        done(err, undefined);
+      }
+    },
+  );
+
   // Default to the durable SQL sink so the ADR 0012 trail is queryable in the admin console.
   const errorSink = opts.errorSink ?? new SqlErrorSink(engine.sql);
   const authed = new WeakMap<FastifyRequest, Tenant>();
@@ -229,6 +263,19 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     }
     if (err instanceof AppError) {
       await reply.status(STATUS[err.code] ?? 400).send({ error: err.toPublic() });
+      return;
+    }
+    // Fastify raises its own client errors — empty or malformed JSON body,
+    // unsupported media type, payload too large — and they arrive here carrying
+    // an accurate 4xx `statusCode`. Collapsing those into 500 tells the caller
+    // the engine broke when the caller's request did, hides the one message that
+    // says how to fix it, and fills the error log (and anything alerting on it)
+    // with false internal faults. Only a genuine 5xx becomes an opaque INTERNAL.
+    const status = typeof err.statusCode === "number" ? err.statusCode : 500;
+    if (status >= 400 && status < 500) {
+      await reply
+        .status(status)
+        .send({ error: { id: record.id, code: err.code ?? "BAD_REQUEST", message: err.message } });
       return;
     }
     await reply

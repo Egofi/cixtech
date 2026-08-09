@@ -53,7 +53,14 @@ ${UI_KIT_JS}
 
   function api(path,opts){
     opts=opts||{};
-    opts.headers=Object.assign({'authorization':'Bearer '+token,'content-type':'application/json'},opts.headers||{});
+    // A JSON content-type only goes on requests that actually carry JSON.
+    // Sending it with no body makes Fastify reject the request outright, which
+    // is what broke every bodyless action in this console: resume payouts,
+    // issue a key, replay or dead-letter a delivery.
+    // (No backticks in here — this file is inlined into a String.raw template.)
+    var base={'authorization':'Bearer '+token};
+    if(opts.body!=null)base['content-type']='application/json';
+    opts.headers=Object.assign(base,opts.headers||{});
     return fetch(path,opts).then(function(r){
       if(r.status===401){logout();throw new Error('Unauthorized');}
       return r.text().then(function(t){

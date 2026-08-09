@@ -23,7 +23,7 @@ BASE_URL ?= http://localhost:3000
 PKG ?=
 
 .PHONY: help setup install clean reset dev smoke urls \
-        db-migrate db-role db-check \
+        db-migrate db-role db-check verify-chains \
         test test-watch test-live typecheck lint format guard ci
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -115,6 +115,9 @@ format: ## Apply formatting and safe lint fixes
 
 guard: ## Fail on a hardcoded chain id / address / RPC URL (§16.5)
 	pnpm guard:constants
+
+verify-chains: ## Ask each configured chain to confirm its own id and token contracts
+	pnpm verify:chains
 
 ci: typecheck lint guard test ## Everything CI runs
 

@@ -1,4 +1,5 @@
 import type { GatherStrategyRegistry, GatheredLeg, PoolGatherer } from "@cixtech/attribution";
+import { GatherBusyError, type GatherLease } from "@cixtech/attribution";
 import { type LedgerService, feeSwept, payoutSettled } from "@cixtech/ledger";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
 import type { FeeSweepPlanner } from "../treasury/fee-sweep-planner.js";
@@ -69,6 +70,15 @@ export interface PayoutServiceOptions {
     treasuryAddressFor: (chain: string) => string | undefined;
   };
   /**
+   * Serialises everything that spends one merchant's pool addresses on a chain.
+   *
+   * Gathering reads on-chain balances and then spends them, which is not atomic:
+   * two overlapping operations both see the same balance, both plan to spend it,
+   * and the second transfer fails on chain — after the ledger has already locked
+   * the funds. Absent = previous behaviour (no serialisation).
+   */
+  gatherLease?: GatherLease;
+  /**
    * Gather strategies (ADR 0011). Each leg is prepared by the strategy its address
    * was MINTED under — which is what provisions native gas before an ERC-20 /
    * TRC-20 transfer. Absent = no preparation, which only works on chains whose
@@ -103,6 +113,7 @@ export class PayoutService {
   private readonly approvals: ApprovalStore | undefined;
   private readonly approvalsRequired: number;
   private readonly feeSweep: PayoutServiceOptions["feeSweep"];
+  private readonly gatherLease: GatherLease | undefined;
 
   constructor(
     private readonly ledger: LedgerService,
@@ -118,6 +129,7 @@ export class PayoutService {
     this.approvals = options.approvals;
     this.approvalsRequired = options.approvalsRequired ?? 0;
     this.feeSweep = options.feeSweep;
+    this.gatherLease = options.gatherLease;
   }
 
   /** Look up a recorded intent by its public id — what the approve endpoint addresses. */
@@ -236,103 +248,121 @@ export class PayoutService {
     };
     await this.policy.check(ctx, now);
 
-    // 2. Gather — one leg when a single address covers it, else consolidate across
-    //    the merchant's pool addresses (ADR 0009 §6.3). Throws if truly short.
-    const legs = await this.gatherer.gather(
-      p.tenant,
-      p.merchant,
-      p.chain,
-      p.asset,
-      p.amountBaseUnits,
-    );
-    const primaryFrom = legs[0]?.address ?? "";
-    await this.journal?.setFrom(p.idempotencyKey, primaryFrom);
+    // Everything that spends this merchant's pool addresses runs under a lease.
+    // Gathering reads on-chain balances and then spends them, which is not
+    // atomic: a concurrent payout — or the console collecting fees — would read
+    // the same balance, plan the same coins, and have its transfer fail on chain
+    // AFTER the ledger had locked the funds.
+    const leaseHolder = p.idempotencyKey;
+    const heldLease = this.gatherLease
+      ? await this.gatherLease.acquire(p.tenant, p.merchant, p.chain, leaseHolder)
+      : true;
+    if (!heldLease) {
+      throw new GatherBusyError(
+        `Another operation is already spending ${p.merchant}'s ${p.chain} pool addresses. Retry shortly.`,
+      );
+    }
+    try {
+      // 2. Gather — one leg when a single address covers it, else consolidate across
+      //    the merchant's pool addresses (ADR 0009 §6.3). Throws if truly short.
+      const legs = await this.gatherer.gather(
+        p.tenant,
+        p.merchant,
+        p.chain,
+        p.asset,
+        p.amountBaseUnits,
+      );
+      const primaryFrom = legs[0]?.address ?? "";
+      await this.journal?.setFrom(p.idempotencyKey, primaryFrom);
 
-    const asset = Asset(p.asset);
-    const available = LedgerAccountKey(`merchant_available:${p.tenant}:${p.merchant}`);
-    const pending = LedgerAccountKey(`merchant_pending_withdrawal:${p.tenant}:${p.merchant}`);
+      const asset = Asset(p.asset);
+      const available = LedgerAccountKey(`merchant_available:${p.tenant}:${p.merchant}`);
+      const pending = LedgerAccountKey(`merchant_pending_withdrawal:${p.tenant}:${p.merchant}`);
 
-    // 3. Lock — reserves the funds (throws InsufficientFundsError if short).
-    await this.ledger.lockPayout({
-      id: JournalEntryId(`${p.idempotencyKey}:lock`),
-      idempotencyKey: IdempotencyKey(`${p.idempotencyKey}:lock`),
-      asset,
-      amount: p.amountBaseUnits,
-      merchantAvailable: available,
-      merchantPendingWithdrawal: pending,
-    });
+      // 3. Lock — reserves the funds (throws InsufficientFundsError if short).
+      await this.ledger.lockPayout({
+        id: JournalEntryId(`${p.idempotencyKey}:lock`),
+        idempotencyKey: IdempotencyKey(`${p.idempotencyKey}:lock`),
+        asset,
+        amount: p.amountBaseUnits,
+        merchantAvailable: available,
+        merchantPendingWithdrawal: pending,
+      });
 
-    // 4. Broadcast each leg. Idempotent on a per-leg key: a crash before the tx id
-    //    is recorded is safe because the broadcaster returns the same tx id.
-    const sent: PayoutLeg[] = [];
-    for (let i = 0; i < legs.length; i++) {
-      const leg = legs[i] as GatheredLeg;
-      const legKey = legs.length === 1 ? p.idempotencyKey : `${p.idempotencyKey}:${i}`;
+      // 4. Broadcast each leg. Idempotent on a per-leg key: a crash before the tx id
+      //    is recorded is safe because the broadcaster returns the same tx id.
+      const sent: PayoutLeg[] = [];
+      for (let i = 0; i < legs.length; i++) {
+        const leg = legs[i] as GatheredLeg;
+        const legKey = legs.length === 1 ? p.idempotencyKey : `${p.idempotencyKey}:${i}`;
 
-      // 4a. Prepare the leg under the strategy THIS ADDRESS WAS MINTED UNDER —
-      //     `leg.gatherStrategy`, never the current global toggle (ADR 0011).
-      //     Dispatching on the toggle would build a transaction the address cannot
-      //     execute and strand its balance. On EVM/Tron this is where the pool
-      //     address gets the native gas an ERC-20/TRC-20 transfer needs; without
-      //     it the broadcast below fails for insufficient gas.
-      if (this.gatherStrategies) {
-        await this.gatherStrategies.forAddress(leg.gatherStrategy).prepare({
-          chain: p.chain,
-          address: leg.address,
-          derivationIndex: leg.derivationIndex,
-          asset: p.asset,
-          amountBaseUnits: leg.amountBaseUnits,
-          idempotencyKey: legKey,
-        });
-      }
+        // 4a. Prepare the leg under the strategy THIS ADDRESS WAS MINTED UNDER —
+        //     `leg.gatherStrategy`, never the current global toggle (ADR 0011).
+        //     Dispatching on the toggle would build a transaction the address cannot
+        //     execute and strand its balance. On EVM/Tron this is where the pool
+        //     address gets the native gas an ERC-20/TRC-20 transfer needs; without
+        //     it the broadcast below fails for insufficient gas.
+        if (this.gatherStrategies) {
+          await this.gatherStrategies.forAddress(leg.gatherStrategy).prepare({
+            chain: p.chain,
+            address: leg.address,
+            derivationIndex: leg.derivationIndex,
+            asset: p.asset,
+            amountBaseUnits: leg.amountBaseUnits,
+            idempotencyKey: legKey,
+          });
+        }
 
-      const authorization = this.authorizer?.mint(
-        {
-          intentId: legKey,
-          tenant: p.tenant,
-          merchant: p.merchant,
-          chain: p.chain,
-          asset: p.asset,
-          amount: leg.amountBaseUnits.toString(),
-          destination: p.destination,
-          sighash: transferCommitment({
+        const authorization = this.authorizer?.mint(
+          {
             intentId: legKey,
+            tenant: p.tenant,
+            merchant: p.merchant,
             chain: p.chain,
             asset: p.asset,
             amount: leg.amountBaseUnits.toString(),
             destination: p.destination,
-            fromAddress: leg.address,
-          }),
-          approvals: p.approvals ?? [],
-        },
-        { now, ttlMs: this.authTtlMs },
-      );
-      const { txId } = await this.broadcaster.send({
-        chain: p.chain,
-        asset: p.asset,
-        amountBaseUnits: leg.amountBaseUnits,
-        fromAddress: leg.address,
-        fromDerivationIndex: leg.derivationIndex,
-        toAddress: p.destination,
-        idempotencyKey: legKey,
-        ...(authorization ? { authorization } : {}),
-      });
-      sent.push({ address: leg.address, txId, amountBaseUnits: leg.amountBaseUnits });
+            sighash: transferCommitment({
+              intentId: legKey,
+              chain: p.chain,
+              asset: p.asset,
+              amount: leg.amountBaseUnits.toString(),
+              destination: p.destination,
+              fromAddress: leg.address,
+            }),
+            approvals: p.approvals ?? [],
+          },
+          { now, ttlMs: this.authTtlMs },
+        );
+        const { txId } = await this.broadcaster.send({
+          chain: p.chain,
+          asset: p.asset,
+          amountBaseUnits: leg.amountBaseUnits,
+          fromAddress: leg.address,
+          fromDerivationIndex: leg.derivationIndex,
+          toAddress: p.destination,
+          idempotencyKey: legKey,
+          ...(authorization ? { authorization } : {}),
+        });
+        sent.push({ address: leg.address, txId, amountBaseUnits: leg.amountBaseUnits });
+      }
+      const primaryTxId = sent[0]?.txId ?? "";
+      await this.journal?.markBroadcast(p.idempotencyKey, primaryTxId);
+
+      // 5. Settle — funds leave the pool; the liability is discharged.
+      await this.settle(p, primaryTxId);
+      await this.journal?.markSettled(p.idempotencyKey);
+
+      // 6. Take the platform's accrued fee out of the same addresses, now that the
+      //    merchant's legs are sent and their share of each balance is spoken for.
+      await this.sweepFee(p, legs);
+
+      const result: PayoutResult = { txId: primaryTxId, status: "settled", from: primaryFrom };
+      if (sent.length > 1) result.legs = sent;
+      return result;
+    } finally {
+      await this.gatherLease?.release(p.tenant, p.merchant, p.chain, leaseHolder);
     }
-    const primaryTxId = sent[0]?.txId ?? "";
-    await this.journal?.markBroadcast(p.idempotencyKey, primaryTxId);
-
-    // 5. Settle — funds leave the pool; the liability is discharged.
-    await this.settle(p, primaryTxId);
-    await this.journal?.markSettled(p.idempotencyKey);
-
-    // 6. Take the platform's accrued fee out of the same addresses, now that the
-    //    merchant's legs are sent and their share of each balance is spoken for.
-    await this.sweepFee(p, legs);
-
-    const result: PayoutResult = { txId: primaryTxId, status: "settled", from: primaryFrom };
-    if (sent.length > 1) result.legs = sent;
-    return result;
   }
 
   /**

@@ -439,6 +439,9 @@ export class AdminService {
       {
         treasuryAddressFor: this.feeTreasuryAddressFor,
         killSwitch: this.killSwitch,
+        // The same lease payouts take: the console is another writer against
+        // these addresses, not a privileged one.
+        gatherLease: this.engine.gatherLease,
       },
     );
     return service.sweep(asset);

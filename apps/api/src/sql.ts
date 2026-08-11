@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   BALANCE_CACHE_SCHEMA_SQL,
   GATHER_CONFIG_SCHEMA_SQL,
+  GATHER_LEASE_SCHEMA_SQL,
   POOL_SCHEMA_SQL,
 } from "@cixtech/attribution";
 import {
@@ -44,6 +45,7 @@ export const SCHEMA_MODULES: readonly SchemaModule[] = [
   { name: "pool", sql: POOL_SCHEMA_SQL },
   { name: "gather-config", sql: GATHER_CONFIG_SCHEMA_SQL },
   { name: "pool-balance-cache", sql: BALANCE_CACHE_SCHEMA_SQL },
+  { name: "gather-lease", sql: GATHER_LEASE_SCHEMA_SQL },
   { name: "policy", sql: POLICY_SCHEMA_SQL },
   { name: "payout-journal", sql: PAYOUT_JOURNAL_SCHEMA_SQL },
   { name: "payout-approval", sql: PAYOUT_APPROVAL_SCHEMA_SQL },

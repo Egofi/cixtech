@@ -1,5 +1,6 @@
 import {
   GatherConfigStore,
+  GatherLease,
   type GatherStrategyRegistry,
   PoolGatherer,
   PoolManager,
@@ -85,6 +86,8 @@ export interface Engine {
   sql: SqlClient;
   /** Decides what the platform is owed and which addresses can settle it. */
   feeSweepPlanner: FeeSweepPlanner;
+  /** Serialises everything that spends one merchant's pool addresses on a chain. */
+  gatherLease: GatherLease;
   gatherConfig: GatherConfigStore;
   chains: ChainRouter;
   tenants: TenantStore;
@@ -119,6 +122,7 @@ export function buildEngine(cfg: EngineConfig): Engine {
     activeStrategy: (chain, tenant) => gatherConfig.activeFor(chain, tenant),
   });
   const gatherer = new PoolGatherer(pool, cfg.chains.balances);
+  const gatherLease = new GatherLease(cfg.sql);
   const feeSweepPlanner = new FeeSweepPlanner(cfg.sql, pool, cfg.chains.balances, {
     ...(cfg.feeSweepDustBaseUnits !== undefined
       ? { dustThresholdBaseUnits: cfg.feeSweepDustBaseUnits }
@@ -146,6 +150,7 @@ export function buildEngine(cfg: EngineConfig): Engine {
     ...(cfg.feeTreasuryAddressFor
       ? { feeSweep: { planner: feeSweepPlanner, treasuryAddressFor: cfg.feeTreasuryAddressFor } }
       : {}),
+    gatherLease,
   });
   const ingestor = new DepositIngestor(
     ledger,
@@ -165,6 +170,7 @@ export function buildEngine(cfg: EngineConfig): Engine {
   return {
     sql: cfg.sql,
     feeSweepPlanner,
+    gatherLease,
     gatherConfig,
     chains: cfg.chains,
     tenants: new TenantStore(cfg.sql),

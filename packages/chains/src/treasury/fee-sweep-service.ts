@@ -1,4 +1,4 @@
-import type { GatherStrategyRegistry } from "@cixtech/attribution";
+import type { GatherLease, GatherStrategyRegistry } from "@cixtech/attribution";
 import { AppError } from "@cixtech/errors";
 import { feeSwept } from "@cixtech/ledger";
 import type { LedgerService, SqlClient } from "@cixtech/ledger";
@@ -29,6 +29,12 @@ export interface FeeSweepServiceOptions {
   treasuryAddressFor: (chain: string) => string | undefined;
   /** Provisions native gas before a token transfer (ADR 0011). */
   gatherStrategies?: GatherStrategyRegistry;
+  /**
+   * The same lease payouts take. Without it this races the payout path for the
+   * same balances — the console is a third writer against those addresses, not a
+   * privileged one.
+   */
+  gatherLease?: GatherLease;
   /**
    * Refuses to move money while the breaker is engaged. Shaped like the payout
    * path's `KillSwitch` so the same SqlKillSwitch instance satisfies both — a
@@ -115,67 +121,85 @@ export class FeeSweepService {
         continue;
       }
 
-      const plan = await this.planner.plan(g.tenant, g.merchant, g.chain, asset);
-      if (plan.claimBaseUnits <= 0n) continue;
-      if (plan.legs.length === 0) {
+      // A merchant mid-payout is skipped rather than waited on: their fee will
+      // be taken by that very payout, or by the next run of this.
+      const holder = `console-sweep:${asset}`;
+      const heldLease = this.options.gatherLease
+        ? await this.options.gatherLease.acquire(g.tenant, g.merchant, g.chain, holder)
+        : true;
+      if (!heldLease) {
         skipped.push({
           merchant: g.merchant,
           chain: g.chain,
-          reason:
-            plan.skippedDust > 0
-              ? "claim is below the dust threshold — not worth the gas"
-              : "claim is not held on this chain",
+          reason: "a payout is spending these addresses right now",
         });
         continue;
       }
-
-      const treasury = LedgerAccountKey(`treasury:${g.chain}`);
-      const pool = LedgerAccountKey(`pool_addr:${g.chain}:${g.merchant}`);
-
-      for (let i = 0; i < plan.legs.length; i++) {
-        const leg = plan.legs[i] as (typeof plan.legs)[number];
-        // Deterministic in the address and amount rather than the clock, so a
-        // retry lands on the same key and the ledger absorbs it.
-        const legKey = `fee-sweep:${g.chain}:${leg.address}:${asset}:${leg.amountBaseUnits}`;
-        try {
-          if (this.options.gatherStrategies) {
-            await this.options.gatherStrategies.forAddress(leg.gatherStrategy).prepare({
-              chain: g.chain,
-              address: leg.address,
-              derivationIndex: leg.derivationIndex,
-              asset,
-              amountBaseUnits: leg.amountBaseUnits,
-              idempotencyKey: legKey,
-            });
-          }
-          await this.broadcaster.send({
-            chain: g.chain,
-            asset,
-            amountBaseUnits: leg.amountBaseUnits,
-            fromAddress: leg.address,
-            fromDerivationIndex: leg.derivationIndex,
-            toAddress: treasuryAddress,
-            idempotencyKey: legKey,
-          });
-          await this.ledger.post(
-            feeSwept({
-              id: JournalEntryId(legKey),
-              idempotencyKey: IdempotencyKey(legKey),
-              asset: Asset(asset),
-              amount: leg.amountBaseUnits,
-              poolAddr: pool,
-              treasury,
-            }),
-          );
-          sweptCount++;
-          total += leg.amountBaseUnits;
-        } catch (err) {
+      try {
+        const plan = await this.planner.plan(g.tenant, g.merchant, g.chain, asset);
+        if (plan.claimBaseUnits <= 0n) continue;
+        if (plan.legs.length === 0) {
           skipped.push({
             merchant: g.merchant,
             chain: g.chain,
-            reason: err instanceof Error ? err.message : String(err),
+            reason:
+              plan.skippedDust > 0
+                ? "claim is below the dust threshold — not worth the gas"
+                : "claim is not held on this chain",
           });
+          continue;
         }
+
+        const treasury = LedgerAccountKey(`treasury:${g.chain}`);
+        const pool = LedgerAccountKey(`pool_addr:${g.chain}:${g.merchant}`);
+
+        for (let i = 0; i < plan.legs.length; i++) {
+          const leg = plan.legs[i] as (typeof plan.legs)[number];
+          // Deterministic in the address and amount rather than the clock, so a
+          // retry lands on the same key and the ledger absorbs it.
+          const legKey = `fee-sweep:${g.chain}:${leg.address}:${asset}:${leg.amountBaseUnits}`;
+          try {
+            if (this.options.gatherStrategies) {
+              await this.options.gatherStrategies.forAddress(leg.gatherStrategy).prepare({
+                chain: g.chain,
+                address: leg.address,
+                derivationIndex: leg.derivationIndex,
+                asset,
+                amountBaseUnits: leg.amountBaseUnits,
+                idempotencyKey: legKey,
+              });
+            }
+            await this.broadcaster.send({
+              chain: g.chain,
+              asset,
+              amountBaseUnits: leg.amountBaseUnits,
+              fromAddress: leg.address,
+              fromDerivationIndex: leg.derivationIndex,
+              toAddress: treasuryAddress,
+              idempotencyKey: legKey,
+            });
+            await this.ledger.post(
+              feeSwept({
+                id: JournalEntryId(legKey),
+                idempotencyKey: IdempotencyKey(legKey),
+                asset: Asset(asset),
+                amount: leg.amountBaseUnits,
+                poolAddr: pool,
+                treasury,
+              }),
+            );
+            sweptCount++;
+            total += leg.amountBaseUnits;
+          } catch (err) {
+            skipped.push({
+              merchant: g.merchant,
+              chain: g.chain,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      } finally {
+        await this.options.gatherLease?.release(g.tenant, g.merchant, g.chain, holder);
       }
     }
 

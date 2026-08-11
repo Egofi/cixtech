@@ -31,6 +31,7 @@ export * from "./reconcile/external-reconciler.js";
 export * from "./treasury/gas-station.js";
 export * from "./treasury/broadcaster-gas-funder.js";
 export * from "./treasury/fee-sweep-service.js";
+export * from "./treasury/fee-sweep-planner.js";
 export * from "./ingest/deposit-cursor.js";
 export * from "./evm/evm-deposit-source.js";
 export * from "./build-router.js";

@@ -87,6 +87,8 @@ export interface AdminPlaneOptions {
   /** Super-admin bearer token. When unset, the admin plane is disabled. */
   token?: string | undefined;
   limits?: { maxPerPayout: string; velocityWindowMs: number; velocityMax: string };
+  /** Where collected fees go, per chain. Absent = the console refuses to sweep. */
+  feeTreasuryAddressFor?: ((chain: string) => string | undefined) | undefined;
 }
 
 export interface AppOptions {
@@ -558,7 +560,12 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   // Admin console + control plane (ADR 0015): separate bearer auth, all-tenant
   // reads, safe audited controls. Registered even when disabled so /admin returns
   // a clear "disabled" 401 rather than a 404.
-  const adminService = new AdminService(engine.sql, engine, opts.admin?.limits ?? DEFAULT_LIMITS);
+  const adminService = new AdminService(
+    engine.sql,
+    engine,
+    opts.admin?.limits ?? DEFAULT_LIMITS,
+    opts.admin?.feeTreasuryAddressFor,
+  );
   registerAdmin(app, { service: adminService, token: opts.admin?.token });
 
   // Tenant portal (dashboard) — static SPA shell; its data calls hit /v1 with the

@@ -102,6 +102,19 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
     );
     return reply.status(200).send(res);
   });
+  app.get("/admin/api/pool-addresses", hidden, (req) => {
+    const { chain, tenant, merchant, state, funded, asset, offset } = q(req);
+    return service.poolAddresses({
+      ...(chain ? { chain } : {}),
+      ...(tenant ? { tenant } : {}),
+      ...(merchant ? { merchant } : {}),
+      ...(state ? { state } : {}),
+      ...(asset ? { asset } : {}),
+      ...(funded === "true" ? { fundedOnly: true } : {}),
+      ...(offset ? { offset: Number(offset) } : {}),
+      ...(lim(req) !== undefined ? { limit: lim(req) } : {}),
+    });
+  });
   app.get("/admin/api/wallets/verify-onchain", hidden, (req, reply) => {
     const { chain, address, asset } = q(req);
     if (!chain || !address) {

@@ -42,6 +42,7 @@ export const ADMIN_JS = String.raw`
   var token=localStorage.getItem(TK);
   var view='overview';
   var root=document.getElementById('app');
+  var poolsFundedOnly=false; // Pool addresses view: show every address or only funded ones.
 
   function esc(s){s=(s==null?'':String(s));return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function short(s){s=String(s||'');return s.length>14?s.slice(0,8)+'…'+s.slice(-4):s;}
@@ -87,7 +88,7 @@ ${UI_KIT_JS}
 
   var NAV_GROUPS=[
     {title:'OVERVIEW',items:[['overview','Statistics / Overview'],['earnings','Earnings & Revenue']]},
-    {title:'LEDGER',items:[['tenants','Tenants'],['ledger','Ledger'],['deposits','Deposits'],['payouts','Payouts']]},
+    {title:'LEDGER',items:[['tenants','Tenants'],['ledger','Ledger'],['pools','Pool addresses'],['deposits','Deposits'],['payouts','Payouts']]},
     {title:'SETTINGS',items:[['webhooks','Webhooks'],['audit','Admin audit'],['errors','Errors']]}
   ];
 
@@ -442,6 +443,93 @@ ${UI_KIT_JS}
             }).catch(fail);
         };
       }
+    }).catch(fail);
+  };
+
+  /**
+   * Every pool address and what it holds.
+   *
+   * Balances come from the worker cache with their age shown, because reading
+   * them live is one RPC call per address per page load. The column that earns
+   * the screen is DRIFT: it is the same comparison ExternalReconciler makes, and
+   * a non-zero value there is what freezes withdrawals — so it is surfaced here
+   * before the reconciler acts on it, not after.
+   */
+  views.pools=function(){
+    var qs='/admin/api/pool-addresses?limit=200'+(poolsFundedOnly?'&funded=true':'');
+    api(qs).then(function(d){
+      var rows=d.addresses||[], groups=d.groups||[], asset=d.asset;
+
+      var funded=0, total=0n, oldest=null, unobserved=0;
+      for(var i=0;i<rows.length;i++){
+        var b=rows[i].balanceBaseUnits;
+        if(b===null){unobserved++;}
+        else if(BigInt(b)>0n){funded++;total+=BigInt(b);}
+        if(rows[i].observedAt&&(!oldest||rows[i].observedAt<oldest))oldest=rows[i].observedAt;
+      }
+      var drift=0n, driftGroups=0, unverifiable=0;
+      for(var g=0;g<groups.length;g++){
+        if(!groups[g].fullyObserved){unverifiable++;continue;}
+        var dg=BigInt(groups[g].driftBaseUnits);
+        if(dg!==0n){driftGroups++;drift+=dg<0n?-dg:dg;}
+      }
+
+      var statGrid=renderStatGrid([
+        ['POOL ADDRESSES', num(d.total), funded+' holding a balance', '👛', 'cyan'],
+        ['ON-CHAIN FLOAT', moneyHtml(total.toString(),asset), 'Across every pool address', '🏦', 'green'],
+        ['LEDGER VS CHAIN', driftGroups===0?'In agreement':moneyHtml(drift.toString(),asset),
+          driftGroups===0?'No drift — the reconciler would pass':driftGroups+' group(s) drifting — this freezes payouts',
+          driftGroups===0?'⚖️':'🚨', driftGroups===0?'green':'bad'],
+        ['OLDEST READING', oldest?ago(oldest):'never',
+          unobserved>0?unobserved+' address(es) never observed':'refreshed by the balance worker',
+          '🕐', unobserved>0?'orange':'purple']
+      ]);
+
+      var driftRows=groups.filter(function(x){return x.fullyObserved&&BigInt(x.driftBaseUnits)!==0n;});
+      var driftPanel='';
+      if(driftRows.length>0){
+        driftPanel=panel('Groups where the ledger and the chain disagree',
+          table(['Chain','Merchant','Ledger says','Chain says','Drift'],driftRows,function(r){
+            return '<td>'+esc(r.chain)+'</td>'+
+              '<td>'+accountCell('pool_addr:'+r.chain+':'+r.merchant)+'</td>'+
+              '<td class="num">'+moneyHtml(r.ledgerBaseUnits,asset)+'</td>'+
+              '<td class="num">'+moneyHtml(r.onChainBaseUnits,asset)+'</td>'+
+              '<td class="num">'+moneyHtml(r.driftBaseUnits,asset)+'</td>';
+          })+
+          '<p class="hint">This is exactly what the external reconciler compares. While any row here is non-zero, turning the reconciler on will trip the kill-switch and halt every payout.</p>');
+      }
+
+      var t=table(['Address','Chain','Merchant','Idx','State','Balance','Observed','Actions'],rows,function(r){
+        var bal = r.balanceBaseUnits===null
+          ? '<span class="muted">not observed</span>'
+          : moneyHtml(r.balanceBaseUnits,asset);
+        var seen = r.lastError
+          ? badge('read failed','bad')
+          : (r.observedAt?'<span title="'+esc(r.observedAt)+'">'+esc(ago(r.observedAt))+'</span>':'<span class="muted">—</span>');
+        var stateCls = r.state==='AVAILABLE'?'muted':(r.state==='IN_USE'?'ok':'warn');
+        return '<td class="mono" title="'+esc(r.address)+'">'+esc(short(r.address))+'</td>'+
+          '<td>'+esc(r.chain)+'</td>'+
+          '<td class="mono" title="'+esc(r.merchant)+'">'+esc(short(r.merchant))+'</td>'+
+          '<td class="num">'+esc(String(r.derivationIndex))+'</td>'+
+          '<td>'+badge(r.state,stateCls)+'</td>'+
+          '<td class="num">'+bal+'</td>'+
+          '<td class="muted">'+seen+'</td>'+
+          '<td class="actions"><button data-verify="'+esc(r.address)+'" data-chain="'+esc(r.chain)+'">Verify now</button></td>';
+      });
+
+      var toggle='<button id="pf-toggle">'+(poolsFundedOnly?'Showing funded only':'Showing all addresses')+'</button>';
+      main('<div class="head"><h2>Pool Addresses</h2><div class="row">'+toggle+'</div></div>'+
+        statGrid+driftPanel+
+        panel('Every address the engine controls'+(d.total>rows.length?' (first '+rows.length+' of '+d.total+')':''),t)+
+        '<p class="hint">An address returning to AVAILABLE does not mean it is empty — funds stay put until a payout gathers them (§6.3). Balances are observed on a schedule; "Verify now" reads the chain directly.</p>');
+
+      var tg=document.getElementById('pf-toggle');
+      if(tg)tg.onclick=function(){poolsFundedOnly=!poolsFundedOnly;views.pools();};
+      document.querySelectorAll('[data-verify]').forEach(function(b){
+        b.onclick=function(){
+          showWalletVerificationSheet(b.getAttribute('data-chain'),b.getAttribute('data-verify'),asset);
+        };
+      });
     }).catch(fail);
   };
 

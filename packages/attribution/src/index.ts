@@ -8,3 +8,4 @@ export * from "./pooled-attribution.js";
 export * from "./gather-strategy.js";
 export * from "./gather-config.js";
 export * from "./eoa-gather-strategy.js";
+export * from "./balance-cache.js";

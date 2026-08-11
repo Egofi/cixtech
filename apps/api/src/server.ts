@@ -94,6 +94,21 @@ async function main(): Promise<void> {
         })
       : undefined,
   );
+  /**
+   * Where the platform's accrued fee is collected to, per chain.
+   *
+   * Per chain and not one global address, because a sweep is a real transfer on
+   * that chain — an EVM address cannot receive a TRC-20. Absent for a chain means
+   * no fee is collected there; the claim simply stays accrued, which is safe.
+   * Falls back to the gas treasury only when explicitly told to, since sharing
+   * one address for float and revenue is a decision, not a default.
+   */
+  const feeTreasuryAddressFor = (chain: string): string | undefined =>
+    env[`CIXTECH_FEE_TREASURY_ADDRESS_${chain.toUpperCase()}`] ??
+    (env["CIXTECH_FEE_TREASURY_USES_GAS_TREASURY"] === "true" ? treasuryAddress : undefined);
+
+  const feeSweepDust = env["CIXTECH_FEE_SWEEP_MIN_BASE_UNITS"];
+
   const gatherStrategies = new GatherStrategyRegistry([
     new EoaFundTransferStrategy(router.deriveAddress, gasStation, {
       gasRequirementBaseUnits: gasRules,
@@ -132,6 +147,8 @@ async function main(): Promise<void> {
     sql,
     chains: router,
     gatherStrategies,
+    feeTreasuryAddressFor,
+    ...(feeSweepDust ? { feeSweepDustBaseUnits: BigInt(feeSweepDust) } : {}),
     // Durable guardrail state (survives restart, shared across nodes): kill-switch,
     // cool-down-aware allow-list, solvency gate, dual-approval, time-lock, velocity.
     policy: new PolicyEngine({
@@ -173,6 +190,7 @@ async function main(): Promise<void> {
     admin: {
       token: env["CIXTECH_ADMIN_TOKEN"],
       limits: { maxPerPayout: maxPayout, velocityWindowMs, velocityMax },
+      feeTreasuryAddressFor,
     },
   });
   const port = Number(env["PORT"] ?? "3000");

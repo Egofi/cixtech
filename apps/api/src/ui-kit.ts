@@ -896,9 +896,9 @@ var ICONS={
   audit:'M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5',
   earnings:'M12 2v20m5-17H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
   errors:'M12 8v5m0 3.5h.01M10.3 4.3L2.8 17a2 2 0 001.7 3h15a2 2 0 001.7-3L14.7 4.3a2 2 0 00-3.4 0z',
-  accounting:'M9 7h6m-6 4h6m-6 4h4M3 3h18v18H3z',
   ai:'M12 2a10 10 0 100 20 10 10 0 000-20zm0 4a6 6 0 110 12 6 6 0 010-12z',
-  por_pos:'M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 10h6v-6h-6z'
+  // Pool addresses: a wallet holding coins, distinct from the ledger's book icon.
+  pools:'M3 8a2 2 0 012-2h14a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2zm0 3h18M16 14h2'
 };
 function navIcon(name){
   var d=ICONS[name];

@@ -1,5 +1,5 @@
-import type { SqlClient } from "@cixtech/ledger";
 import type { PoolGroup, PoolGroupEnumerator } from "@cixtech/chains";
+import type { SqlClient } from "@cixtech/ledger";
 
 /**
  * SQL implementation of `PoolGroupEnumerator` (build spec §8, `reconcile-external`).

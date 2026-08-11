@@ -1,6 +1,7 @@
 import type { GatherStrategyRegistry, GatheredLeg, PoolGatherer } from "@cixtech/attribution";
-import { type LedgerService, payoutSettled } from "@cixtech/ledger";
+import { type LedgerService, feeSwept, payoutSettled } from "@cixtech/ledger";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
+import type { FeeSweepPlanner } from "../treasury/fee-sweep-planner.js";
 import { type ApprovalStore, WithdrawalNotFoundError } from "./approval-store.js";
 import { type AuthorizationSigner, transferCommitment } from "./authorization.js";
 import type { PayoutBroadcaster } from "./broadcaster.js";
@@ -56,6 +57,18 @@ export interface PayoutServiceOptions {
   /** How many distinct approvals a held payout needs. Mirrors the policy config. */
   approvalsRequired?: number;
   /**
+   * Collects the platform's accrued fee in the same pass as the payout (§6.3).
+   *
+   * The engine is already sending a transaction out of these addresses; the fee
+   * rides along instead of paying for a gather of its own. Absent = payouts
+   * behave exactly as before, so this is additive.
+   */
+  feeSweep?: {
+    planner: FeeSweepPlanner;
+    /** Where the platform's share goes, per chain. Absent for a chain = no sweep there. */
+    treasuryAddressFor: (chain: string) => string | undefined;
+  };
+  /**
    * Gather strategies (ADR 0011). Each leg is prepared by the strategy its address
    * was MINTED under — which is what provisions native gas before an ERC-20 /
    * TRC-20 transfer. Absent = no preparation, which only works on chains whose
@@ -89,6 +102,7 @@ export class PayoutService {
   private readonly gatherStrategies: GatherStrategyRegistry | undefined;
   private readonly approvals: ApprovalStore | undefined;
   private readonly approvalsRequired: number;
+  private readonly feeSweep: PayoutServiceOptions["feeSweep"];
 
   constructor(
     private readonly ledger: LedgerService,
@@ -103,6 +117,7 @@ export class PayoutService {
     this.gatherStrategies = options.gatherStrategies;
     this.approvals = options.approvals;
     this.approvalsRequired = options.approvalsRequired ?? 0;
+    this.feeSweep = options.feeSweep;
   }
 
   /** Look up a recorded intent by its public id — what the approve endpoint addresses. */
@@ -311,9 +326,99 @@ export class PayoutService {
     await this.settle(p, primaryTxId);
     await this.journal?.markSettled(p.idempotencyKey);
 
+    // 6. Take the platform's accrued fee out of the same addresses, now that the
+    //    merchant's legs are sent and their share of each balance is spoken for.
+    await this.sweepFee(p, legs);
+
     const result: PayoutResult = { txId: primaryTxId, status: "settled", from: primaryFrom };
     if (sent.length > 1) result.legs = sent;
     return result;
+  }
+
+  /**
+   * Collect the platform's accrued fee from the addresses this payout just used.
+   *
+   * Deliberately AFTER the merchant is paid and settled: the merchant's money is
+   * the obligation, the platform's fee is not, so a failure here must never be
+   * able to hold up a withdrawal. Any leg that fails is simply left for the next
+   * payout or a manual settle — the claim is recomputed from the ledger every
+   * time, so nothing is lost by deferring it.
+   *
+   * The ledger entry is posted per leg, only once its transfer has been sent,
+   * which is what keeps `pool_addr` in step with the chain. Posting first would
+   * manufacture exactly the drift the external reconciler treats as theft.
+   */
+  private async sweepFee(p: PayoutParams, merchantLegs: GatheredLeg[]): Promise<void> {
+    if (!this.feeSweep) return;
+    const treasuryAddress = this.feeSweep.treasuryAddressFor(p.chain);
+    if (!treasuryAddress) return;
+
+    // What the merchant's legs already committed on each address, so the fee
+    // plan cannot try to spend the same coins twice.
+    const reserved = new Map<string, bigint>();
+    for (const leg of merchantLegs) {
+      reserved.set(leg.address, (reserved.get(leg.address) ?? 0n) + leg.amountBaseUnits);
+    }
+
+    let plan: Awaited<ReturnType<FeeSweepPlanner["plan"]>>;
+    try {
+      plan = await this.feeSweep.planner.plan(p.tenant, p.merchant, p.chain, p.asset, reserved);
+    } catch {
+      return; // The payout stands; the fee waits for the next opportunity.
+    }
+    if (plan.legs.length === 0) return;
+
+    const asset = Asset(p.asset);
+    const treasury = LedgerAccountKey(`treasury:${p.chain}`);
+    const pool = LedgerAccountKey(`pool_addr:${p.chain}:${p.merchant}`);
+
+    for (let i = 0; i < plan.legs.length; i++) {
+      const leg = plan.legs[i] as (typeof plan.legs)[number];
+      // Derived from the payout key, never a timestamp: a retry must land on the
+      // same key and be absorbed, not post a second entry.
+      const legKey = `${p.idempotencyKey}:fee:${i}`;
+      try {
+        // An address used for BOTH a merchant leg and a fee leg has to pay for
+        // two transfers, and `prepare` only guarantees one. What covers the
+        // second is the gas funder topping up to `requirement × topUpMultiple`
+        // (3×) rather than to the requirement exactly — so this call finds the
+        // address already funded and provisions nothing. That multiple is
+        // load-bearing here, not a comfort margin: drop it to 1 and every fee
+        // leg on a shared address fails for insufficient gas.
+        if (this.gatherStrategies) {
+          await this.gatherStrategies.forAddress(leg.gatherStrategy).prepare({
+            chain: p.chain,
+            address: leg.address,
+            derivationIndex: leg.derivationIndex,
+            asset: p.asset,
+            amountBaseUnits: leg.amountBaseUnits,
+            idempotencyKey: legKey,
+          });
+        }
+        await this.broadcaster.send({
+          chain: p.chain,
+          asset: p.asset,
+          amountBaseUnits: leg.amountBaseUnits,
+          fromAddress: leg.address,
+          fromDerivationIndex: leg.derivationIndex,
+          toAddress: treasuryAddress,
+          idempotencyKey: legKey,
+        });
+        await this.ledger.post(
+          feeSwept({
+            id: JournalEntryId(legKey),
+            idempotencyKey: IdempotencyKey(legKey),
+            asset,
+            amount: leg.amountBaseUnits,
+            poolAddr: pool,
+            treasury,
+          }),
+        );
+      } catch {
+        // One address failing (gas, RPC) must not abort the rest, and must not
+        // fail the payout that already succeeded.
+      }
+    }
   }
 
   /** Discharge the earmarked liability and move the asset out of the pool (idempotent on the intent). */

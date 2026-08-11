@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { GATHER_CONFIG_SCHEMA_SQL, POOL_SCHEMA_SQL } from "@cixtech/attribution";
+import {
+  BALANCE_CACHE_SCHEMA_SQL,
+  GATHER_CONFIG_SCHEMA_SQL,
+  POOL_SCHEMA_SQL,
+} from "@cixtech/attribution";
 import {
   PAYOUT_APPROVAL_SCHEMA_SQL,
   PAYOUT_JOURNAL_SCHEMA_SQL,
@@ -9,10 +13,8 @@ import { LEDGER_SCHEMA_SQL } from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
 import type { MigratableSqlClient } from "@cixtech/postgres";
 import { ADMIN_SCHEMA_SQL } from "./admin/admin-schema.js";
-import { API_SCHEMA_SQL } from "./api-schema.js";
-import { ACCOUNTING_SCHEMA_SQL } from "./accounting/accounting-schema.js";
 import { AI_SCHEMA_SQL } from "./ai/ai-schema.js";
-import { CHECKOUT_SCHEMA_SQL } from "./checkout/checkout-schema.js";
+import { API_SCHEMA_SQL } from "./api-schema.js";
 import { CURSOR_SCHEMA_SQL } from "./chains/deposit-cursor.js";
 import { RLS_SCHEMA_SQL, assertTenantTablesProtected } from "./rls.js";
 
@@ -41,14 +43,13 @@ export const SCHEMA_MODULES: readonly SchemaModule[] = [
   { name: "ledger", sql: LEDGER_SCHEMA_SQL },
   { name: "pool", sql: POOL_SCHEMA_SQL },
   { name: "gather-config", sql: GATHER_CONFIG_SCHEMA_SQL },
+  { name: "pool-balance-cache", sql: BALANCE_CACHE_SCHEMA_SQL },
   { name: "policy", sql: POLICY_SCHEMA_SQL },
   { name: "payout-journal", sql: PAYOUT_JOURNAL_SCHEMA_SQL },
   { name: "payout-approval", sql: PAYOUT_APPROVAL_SCHEMA_SQL },
   { name: "api", sql: API_SCHEMA_SQL },
   { name: "admin", sql: ADMIN_SCHEMA_SQL },
   { name: "deposit-cursor", sql: CURSOR_SCHEMA_SQL },
-  { name: "checkout", sql: CHECKOUT_SCHEMA_SQL },
-  { name: "accounting", sql: ACCOUNTING_SCHEMA_SQL },
   { name: "ai", sql: AI_SCHEMA_SQL },
   { name: "rls", sql: RLS_SCHEMA_SQL },
 ];

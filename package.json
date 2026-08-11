@@ -14,6 +14,7 @@
     "lint": "biome check --write .",
     "check": "biome check --write .",
     "guard:constants": "node tooling/no-magic-constants/check.mjs packages",
+    "verify:chains": "node scripts/verify-chain-config.mjs",
     "dev": "node apps/api/dev-run.mjs",
     "db:migrate": "node apps/api/migrate.mjs",
     "generate-test-key": "node scripts/generate-test-key.mjs",

@@ -2,7 +2,7 @@ import { chainConfig, supportedChains } from "./chains.js";
 import type { ChainConfig } from "./chains.js";
 import { chainEnv } from "./env.js";
 import type { ChainEnv } from "./env.js";
-import { tokenConfig } from "./tokens.js";
+import { chainTokens, tokenConfig } from "./tokens.js";
 import type { TokenConfig } from "./tokens.js";
 
 /**
@@ -24,6 +24,11 @@ export class ChainRegistry {
 
   token(chain: string, symbol: string): TokenConfig {
     return tokenConfig(this.env, chain, symbol);
+  }
+
+  /** Every token this chain carries in this env — the set a deployment must resolve. */
+  tokens(chain: string): readonly TokenConfig[] {
+    return chainTokens(this.env, chain);
   }
 
   chains(): string[] {

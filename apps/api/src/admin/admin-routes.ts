@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { chainEnvOrNull } from "@cixtech/chain-config";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { UnauthorizedError } from "../stores.js";
 import type { AdminService } from "./admin-service.js";
@@ -101,6 +102,19 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
     );
     return reply.status(200).send(res);
   });
+  app.get("/admin/api/pool-addresses", hidden, (req) => {
+    const { chain, tenant, merchant, state, funded, asset, offset } = q(req);
+    return service.poolAddresses({
+      ...(chain ? { chain } : {}),
+      ...(tenant ? { tenant } : {}),
+      ...(merchant ? { merchant } : {}),
+      ...(state ? { state } : {}),
+      ...(asset ? { asset } : {}),
+      ...(funded === "true" ? { fundedOnly: true } : {}),
+      ...(offset ? { offset: Number(offset) } : {}),
+      ...(lim(req) !== undefined ? { limit: lim(req) } : {}),
+    });
+  });
   app.get("/admin/api/wallets/verify-onchain", hidden, (req, reply) => {
     const { chain, address, asset } = q(req);
     if (!chain || !address) {
@@ -113,7 +127,7 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
   // Symbol → decimals, so the console can turn base units into money. Its own
   // route rather than a field on the overview: every view needs it, and none of
   // them should have to pull the whole dashboard to get it.
-  app.get("/admin/api/assets", hidden, () => ({ assets: service.assets() }));
+  app.get("/admin/api/assets", hidden, () => ({ assets: service.assets(), env: chainEnvOrNull() }));
   app.get("/admin/api/tenants", hidden, () => service.listTenants());
   app.get("/admin/api/tenants/:id", hidden, async (req, reply) => {
     const { id } = req.params as { id: string };

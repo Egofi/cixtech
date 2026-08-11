@@ -1,9 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { assetRegistry } from "@cixtech/chain-config";
-import { FeeSweepService, SqlKillSwitch } from "@cixtech/chains";
-import { accountTypeOf, feeSwept, LedgerService, normalBalance, SqlLedgerStore } from "@cixtech/ledger";
+import { FeeSweepService, FeeTreasuryNotConfiguredError, SqlKillSwitch } from "@cixtech/chains";
+import {
+  LedgerService,
+  SqlLedgerStore,
+  accountTypeOf,
+  feeSwept,
+  normalBalance,
+} from "@cixtech/ledger";
 import type { SqlClient } from "@cixtech/ledger";
-import { AccountType, Asset, IdempotencyKey, type JournalEntryId, LedgerAccountKey } from "@cixtech/types";
+import {
+  AccountType,
+  Asset,
+  IdempotencyKey,
+  type JournalEntryId,
+  type LedgerAccountKey,
+} from "@cixtech/types";
 import type { Engine } from "../engine.js";
 
 export interface AuditEntry {
@@ -44,6 +56,8 @@ export class AdminService {
       velocityWindowMs: number;
       velocityMax: string;
     },
+    /** Where collected fees go, per chain. Absent = the console cannot sweep. */
+    private readonly feeTreasuryAddressFor?: (chain: string) => string | undefined,
   ) {
     this.killSwitch = new SqlKillSwitch(sql);
   }
@@ -253,10 +267,180 @@ export class AdminService {
   }
 
   /**
-   * Sweep accrued platform fee revenue from deposit pool addresses into platform treasury.
+   * Every pool address, with its cached on-chain balance and the drift of its
+   * group against the ledger.
+   *
+   * Drift is the column that matters. `ExternalReconciler` compares exactly this
+   * number — a pool group's `pool_addr` ledger balance against the sum of its
+   * addresses on chain — and trips the circuit breaker on any mismatch. Showing
+   * it here is the pre-flight: an operator sees the number that would freeze
+   * withdrawals BEFORE the reconciler acts on it.
+   *
+   * Balances come from the worker-maintained cache with their observation time,
+   * never a live read: one RPC round trip per address per page load does not
+   * survive an unbounded pool or a rate-limited endpoint. `observedAt` travels
+   * with every number so a stale one cannot pass for current.
+   */
+  async poolAddresses(
+    filter: {
+      chain?: string | undefined;
+      tenant?: string | undefined;
+      merchant?: string | undefined;
+      state?: string | undefined;
+      fundedOnly?: boolean | undefined;
+      asset?: string | undefined;
+      limit?: number | undefined;
+      offset?: number | undefined;
+    } = {},
+  ) {
+    const asset = (filter.asset ?? "USDT").toUpperCase();
+    const limit = clampLimit(filter.limit);
+    const offset = Math.max(0, Math.trunc(filter.offset ?? 0));
+
+    const where: string[] = [];
+    const params: unknown[] = [asset];
+    const add = (clause: string, value: unknown): void => {
+      params.push(value);
+      where.push(`${clause} $${params.length}`);
+    };
+    if (filter.chain) add("p.chain =", filter.chain.toUpperCase());
+    if (filter.tenant) add("p.tenant =", filter.tenant);
+    if (filter.merchant) add("p.merchant =", filter.merchant);
+    if (filter.state) add("p.state =", filter.state.toUpperCase());
+    if (filter.fundedOnly) where.push("COALESCE(b.balance_base_units, 0) > 0");
+    const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+
+    const { rows } = await this.sql.query<{
+      address: string;
+      tenant: string;
+      merchant: string;
+      chain: string;
+      derivation_index: number;
+      state: string;
+      gather_strategy: string;
+      cooldown_until: string | null;
+      balance: string | null;
+      observed_at: string | null;
+      last_error: string | null;
+      total: string;
+    }>(
+      `SELECT p.address, p.tenant, p.merchant, p.chain, p.derivation_index,
+              p.state, p.gather_strategy, p.cooldown_until,
+              b.balance_base_units::text AS balance,
+              b.observed_at, b.last_error,
+              COUNT(*) OVER ()::text AS total
+         FROM pool_address p
+         LEFT JOIN pool_address_balance b
+           ON b.chain = p.chain AND b.address = p.address AND b.asset = $1
+         ${whereSql}
+        ORDER BY p.chain, p.tenant, p.merchant, p.derivation_index
+        LIMIT ${limit} OFFSET ${offset}`,
+      params,
+    );
+
+    // Ledger side of the same comparison, per (chain, merchant) group.
+    const { rows: ledgerRows } = await this.sql.query<{ account: string; amount: string }>(
+      "SELECT account, amount FROM balance WHERE account LIKE 'pool_addr:%' AND asset = $1",
+      [asset],
+    );
+    const ledgerByGroup = new Map<string, bigint>();
+    for (const r of ledgerRows) {
+      const key = r.account as LedgerAccountKey;
+      ledgerByGroup.set(r.account.replace(/^pool_addr:/, ""), normalBalance(key, BigInt(r.amount)));
+    }
+
+    // On-chain totals per group, summed across ALL of a group's addresses —
+    // not just the page — or drift would appear on every paginated view.
+    const { rows: groupRows } = await this.sql.query<{
+      chain: string;
+      merchant: string;
+      onchain: string;
+      addresses: string;
+      observed: string;
+      oldest: string | null;
+    }>(
+      `SELECT p.chain, p.merchant,
+              COALESCE(SUM(b.balance_base_units), 0)::text AS onchain,
+              COUNT(*)::text AS addresses,
+              COUNT(b.observed_at)::text AS observed,
+              MIN(b.observed_at) AS oldest
+         FROM pool_address p
+         LEFT JOIN pool_address_balance b
+           ON b.chain = p.chain AND b.address = p.address AND b.asset = $1
+        GROUP BY p.chain, p.merchant`,
+      [asset],
+    );
+
+    const groups = groupRows.map((g) => {
+      const ledger = ledgerByGroup.get(`${g.chain}:${g.merchant}`) ?? 0n;
+      const onChain = BigInt(g.onchain);
+      return {
+        chain: g.chain,
+        merchant: g.merchant,
+        ledgerBaseUnits: ledger.toString(),
+        onChainBaseUnits: onChain.toString(),
+        driftBaseUnits: (onChain - ledger).toString(),
+        addresses: Number(g.addresses),
+        // A group is only comparable once every address in it has been observed.
+        // Partial coverage would read as drift that is really just a missing read.
+        fullyObserved: Number(g.observed) === Number(g.addresses),
+        oldestObservation: g.oldest ? new Date(g.oldest).toISOString() : null,
+      };
+    });
+
+    const driftByGroup = new Map(groups.map((g) => [`${g.chain}:${g.merchant}`, g]));
+
+    return {
+      asset,
+      total: Number(rows[0]?.total ?? "0"),
+      limit,
+      offset,
+      addresses: rows.map((r) => ({
+        address: r.address,
+        tenant: r.tenant,
+        merchant: r.merchant,
+        chain: r.chain,
+        derivationIndex: r.derivation_index,
+        state: r.state,
+        gatherStrategy: r.gather_strategy,
+        cooldownUntil: r.cooldown_until ? new Date(r.cooldown_until).toISOString() : null,
+        balanceBaseUnits: r.balance ?? null,
+        observedAt: r.observed_at ? new Date(r.observed_at).toISOString() : null,
+        lastError: r.last_error,
+        groupDriftBaseUnits: driftByGroup.get(`${r.chain}:${r.merchant}`)?.driftBaseUnits ?? "0",
+      })),
+      groups,
+    };
+  }
+
+  /**
+   * Collect the platform's accrued fee out of the pool addresses that hold it.
+   *
+   * A real transfer, not a book entry: the coins move to the platform treasury
+   * and the ledger follows. It is the same primitive a payout uses to take the
+   * fee in passing (§6.3) — this is the manual trigger for balances with no
+   * payout coming.
+   *
+   * Refuses when no fee treasury address is configured for a chain rather than
+   * quietly doing nothing, and obeys the kill-switch like any other money move.
    */
   async sweepFees(asset = "USDT") {
-    const service = new FeeSweepService(this.sql);
+    if (!this.feeTreasuryAddressFor) {
+      throw new FeeTreasuryNotConfiguredError(
+        "No fee treasury address configured — set CIXTECH_FEE_TREASURY_ADDRESS_<CHAIN> before collecting fees.",
+        { exposable: true },
+      );
+    }
+    const service = new FeeSweepService(
+      this.sql,
+      this.engine.ledger,
+      this.engine.feeSweepPlanner,
+      this.engine.chains.broadcaster,
+      {
+        treasuryAddressFor: this.feeTreasuryAddressFor,
+        killSwitch: this.killSwitch,
+      },
+    );
     return service.sweep(asset);
   }
 
@@ -349,7 +533,8 @@ export class AdminService {
       BSC: `https://bscscan.com/address/${primaryAddress}`,
       ETHEREUM: `https://etherscan.io/address/${primaryAddress}`,
     };
-    const explorerUrl = explorerMap[cleanChain] ?? `https://blockscan.com/address/${primaryAddress}`;
+    const explorerUrl =
+      explorerMap[cleanChain] ?? `https://blockscan.com/address/${primaryAddress}`;
 
     return {
       chain: cleanChain,

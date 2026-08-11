@@ -1,5 +1,5 @@
+import { LedgerService, SqlLedgerStore, depositFinalized } from "@cixtech/ledger";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
-import { depositFinalized, LedgerService, SqlLedgerStore } from "@cixtech/ledger";
 import { describe, expect, it } from "vitest";
 import { ADMIN_TOKEN, adminAuth, auth, makeApi } from "./harness.js";
 
@@ -204,11 +204,17 @@ describe("admin console API", () => {
     expect(["EXACT_MATCH", "SURPLUS", "DEFICIT", "UNAVAILABLE"]).toContain(body.status);
   });
 
-  it("sweeps accrued platform fee revenue into platform treasury without over-sweeping", async () => {
+  /**
+   * This used to assert that a sweep succeeded, moved 5000, and could not
+   * over-sweep — all while transferring nothing on chain. That behaviour was the
+   * bug: `pool_addr` fell in the ledger while the coins stayed in the merchant's
+   * address, which is precisely the mismatch the external reconciler treats as
+   * theft. The contract is now the opposite one.
+   */
+  it("refuses to collect fees when there is nowhere to send them", async () => {
     const ctx = await makeApi();
     const ledger = new LedgerService(new SqlLedgerStore(ctx.sql));
 
-    // Post a deposit entry: 1,000,000 units with 50 bps (0.5%) fee = 5,000 fee
     await ledger.post(
       depositFinalized({
         id: JournalEntryId("sweep-dep-1"),
@@ -222,48 +228,20 @@ describe("admin console API", () => {
       }),
     );
 
-    // Initial earnings check: unsweptFee should be 5000
-    const initialEarnings = await ctx.app.inject({
-      method: "GET",
-      url: "/admin/api/earnings",
-      headers: adminAuth(),
-    });
-    const initUsdt = (initialEarnings.json().summary as Array<{ asset: string; unsweptFee: string }>).find(
-      (s) => s.asset === "USDT",
-    );
-    expect(initUsdt?.unsweptFee).toBe("5000");
-
-    // Perform first sweep
-    const sweep1 = await ctx.app.inject({
+    const sweep = await ctx.app.inject({
       method: "POST",
       url: "/admin/api/earnings/sweep",
       headers: adminAuth(),
       payload: { asset: "USDT" },
     });
-    expect(sweep1.statusCode).toBe(200);
-    expect(sweep1.json().sweptCount).toBe(1);
-    expect(sweep1.json().totalSweptAmount).toBe("5000");
+    expect(sweep.statusCode).toBe(400);
+    expect(sweep.json().error.code).toBe("FEE_TREASURY_NOT_CONFIGURED");
 
-    // Post-sweep earnings check: unsweptFee should now be 0
-    const afterEarnings = await ctx.app.inject({
-      method: "GET",
-      url: "/admin/api/earnings",
-      headers: adminAuth(),
-    });
-    const afterUsdt = (afterEarnings.json().summary as Array<{ asset: string; unsweptFee: string }>).find(
-      (s) => s.asset === "USDT",
+    // And critically: it posted nothing. A refused sweep must leave no trace in
+    // the ledger, or it would create the very drift it is meant to avoid.
+    const { rows } = await ctx.sql.query<{ n: string }>(
+      "SELECT count(*) AS n FROM journal_entry WHERE kind = 'fee.swept'",
     );
-    expect(afterUsdt?.unsweptFee).toBe("0");
-
-    // Second sweep attempt: should sweep 0 since all accrued fees have been swept
-    const sweep2 = await ctx.app.inject({
-      method: "POST",
-      url: "/admin/api/earnings/sweep",
-      headers: adminAuth(),
-      payload: { asset: "USDT" },
-    });
-    expect(sweep2.statusCode).toBe(200);
-    expect(sweep2.json().sweptCount).toBe(0);
-    expect(sweep2.json().totalSweptAmount).toBe("0");
+    expect(rows[0]?.n).toBe("0");
   });
 });

@@ -152,7 +152,7 @@ export class PortalService {
       if (grossAmountBig > 0n && feeCollectedBig > 0n) {
         feeBps = Math.round(Number((feeCollectedBig * 10000n) / grossAmountBig));
         const pct = (Number(feeCollectedBig) / Number(grossAmountBig)) * 100;
-        feePercent = `${parseFloat(pct.toFixed(4))}%`;
+        feePercent = `${Number.parseFloat(pct.toFixed(4))}%`;
       }
 
       const grossStr = grossAmountBig.toString();

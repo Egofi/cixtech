@@ -41,8 +41,10 @@ export interface ChainConfig {
  * no-magic-constants guard forbids URL/address literals outside... nothing:
  * they live in the deployment env, not the repo.
  *
- * TODO: fill BTC, LTC, XRP for both envs (EVM family — POLYGON, BSC, ARBITRUM,
- * BASE — is complete).
+ * TODO: fill BTC, LTC, XRP for both envs. Those three are NOT more entries here
+ * — BTC/LTC need a UTXO adapter family, and XRP needs the shared-account +
+ * destination-tag attribution seam (§6.1, ADR 0009). The EVM family is complete
+ * and adding another EVM chain IS just an entry here plus its env vars.
  */
 const CHAINS: Record<ChainEnv, Record<string, ChainConfig>> = {
   testnet: {
@@ -85,6 +87,33 @@ const CHAINS: Record<ChainEnv, Record<string, ChainConfig>> = {
       finality: { confirmations: 20, note: "L2 — true finality follows L1" },
       gas: { perTransferBaseUnits: 1_000_000_000_000_000n, nativeAsset: "ETH" },
     },
+    ETHEREUM: {
+      chain: "ETHEREUM",
+      family: "EVM",
+      chainId: 11155111, // Sepolia
+      rpcUrlEnvVar: "ETHEREUM_RPC_URL",
+      finality: { confirmations: 64, note: "two epochs — PoS finality" },
+      // L1 gas is the outlier: an ERC-20 transfer at a busy base fee costs an
+      // order of magnitude more than an L2's, so the per-address gather budget
+      // is sized well above Base/Arbitrum rather than shared with them.
+      gas: { perTransferBaseUnits: 5_000_000_000_000_000n, nativeAsset: "ETH" },
+    },
+    AVALANCHE: {
+      chain: "AVALANCHE",
+      family: "EVM",
+      chainId: 43113, // Fuji testnet
+      rpcUrlEnvVar: "AVALANCHE_RPC_URL",
+      finality: { confirmations: 12, note: "fast finality — buffer for RPC lag" },
+      gas: { perTransferBaseUnits: 5_000_000_000_000_000n, nativeAsset: "AVAX" },
+    },
+    OPTIMISM: {
+      chain: "OPTIMISM",
+      family: "EVM",
+      chainId: 11155420, // OP Sepolia
+      rpcUrlEnvVar: "OPTIMISM_RPC_URL",
+      finality: { confirmations: 20, note: "L2 — true finality follows L1" },
+      gas: { perTransferBaseUnits: 1_000_000_000_000_000n, nativeAsset: "ETH" },
+    },
   },
   mainnet: {
     TRON: {
@@ -123,6 +152,30 @@ const CHAINS: Record<ChainEnv, Record<string, ChainConfig>> = {
       family: "EVM",
       chainId: 8453,
       rpcUrlEnvVar: "BASE_RPC_URL",
+      finality: { confirmations: 20, note: "L2 — true finality follows L1" },
+      gas: { perTransferBaseUnits: 1_000_000_000_000_000n, nativeAsset: "ETH" },
+    },
+    ETHEREUM: {
+      chain: "ETHEREUM",
+      family: "EVM",
+      chainId: 1,
+      rpcUrlEnvVar: "ETHEREUM_RPC_URL",
+      finality: { confirmations: 64, note: "two epochs — PoS finality" },
+      gas: { perTransferBaseUnits: 5_000_000_000_000_000n, nativeAsset: "ETH" },
+    },
+    AVALANCHE: {
+      chain: "AVALANCHE",
+      family: "EVM",
+      chainId: 43114,
+      rpcUrlEnvVar: "AVALANCHE_RPC_URL",
+      finality: { confirmations: 12, note: "fast finality — buffer for RPC lag" },
+      gas: { perTransferBaseUnits: 5_000_000_000_000_000n, nativeAsset: "AVAX" },
+    },
+    OPTIMISM: {
+      chain: "OPTIMISM",
+      family: "EVM",
+      chainId: 10,
+      rpcUrlEnvVar: "OPTIMISM_RPC_URL",
       finality: { confirmations: 20, note: "L2 — true finality follows L1" },
       gas: { perTransferBaseUnits: 1_000_000_000_000_000n, nativeAsset: "ETH" },
     },

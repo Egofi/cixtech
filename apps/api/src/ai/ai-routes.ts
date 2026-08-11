@@ -1,9 +1,9 @@
 import {
+  type AgentRuleAction,
+  type AgentRuleCondition,
   AgenticRulesEngine,
   AnomalyDetector,
   FinancialAiEngine,
-  type AgentRuleAction,
-  type AgentRuleCondition,
 } from "@cixtech/ai";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Engine } from "../engine.js";
@@ -39,12 +39,16 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
     schema: {
       tags: ["ai"],
       summary: "Natural Language Financial Query Engine",
-      description: "Translates natural language financial prompts into safe parameterized double-entry sub-ledger queries.",
+      description:
+        "Translates natural language financial prompts into safe parameterized double-entry sub-ledger queries.",
       body: {
         type: "object",
         required: ["prompt"],
         properties: {
-          prompt: { type: "string", description: "Financial inquiry (e.g. What is our available USDT float balance?)" },
+          prompt: {
+            type: "string",
+            description: "Financial inquiry (e.g. What is our available USDT float balance?)",
+          },
         },
       },
     },
@@ -54,7 +58,8 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
     schema: {
       tags: ["ai"],
       summary: "Real-Time Financial Anomaly Risk Feed",
-      description: "Fetches active risk alerts including withdrawal velocity spikes, zero-day address drains, and unallocated float surges.",
+      description:
+        "Fetches active risk alerts including withdrawal velocity spikes, zero-day address drains, and unallocated float surges.",
     },
   };
 
@@ -62,15 +67,22 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
     schema: {
       tags: ["ai"],
       summary: "Create Autonomous Agentic Rule",
-      description: "Registers an autonomous financial rule with custom triggers (BALANCE_BELOW, VELOCITY_ABOVE, ANOMALY_TRIGGERED).",
+      description:
+        "Registers an autonomous financial rule with custom triggers (BALANCE_BELOW, VELOCITY_ABOVE, ANOMALY_TRIGGERED).",
       body: {
         type: "object",
         required: ["name", "conditionType", "conditionThreshold", "action"],
         properties: {
           name: { type: "string" },
-          conditionType: { type: "string", enum: ["BALANCE_BELOW", "VELOCITY_ABOVE", "ANOMALY_TRIGGERED"] },
+          conditionType: {
+            type: "string",
+            enum: ["BALANCE_BELOW", "VELOCITY_ABOVE", "ANOMALY_TRIGGERED"],
+          },
           conditionThreshold: { type: "string" },
-          action: { type: "string", enum: ["PAUSE_WITHDRAWALS", "NOTIFY", "AUTO_REBALANCE", "REQUIRE_APPROVAL"] },
+          action: {
+            type: "string",
+            enum: ["PAUSE_WITHDRAWALS", "NOTIFY", "AUTO_REBALANCE", "REQUIRE_APPROVAL"],
+          },
         },
       },
     },

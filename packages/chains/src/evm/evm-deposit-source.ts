@@ -1,7 +1,7 @@
 import type { ChainDeposit, DepositSource } from "../chain-adapter.js";
+import type { DepositCursorStore } from "../ingest/deposit-cursor.js";
 import type { EvmAdapter } from "./evm-adapter.js";
 import type { EvmRpc } from "./evm-rpc.js";
-import type { DepositCursorStore } from "../ingest/deposit-cursor.js";
 
 export interface EvmDepositSourceConfig {
   /** How many blocks behind the head to start watching a NEW address (never genesis). */

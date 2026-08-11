@@ -13,6 +13,7 @@ import {
   type ChainRouter,
   DepositIngestor,
   type DepositScreener,
+  FeeSweepPlanner,
   PayoutJournal,
   PayoutService,
   type PolicyEngine,
@@ -41,6 +42,15 @@ const COOLDOWN_MS = 30 * 60_000;
  */
 export interface EngineConfig {
   sql: SqlClient;
+  /**
+   * Where the platform's accrued fee is collected to, per chain. Supplying it
+   * turns on fee collection during the gather (§6.3) — the payout already sends
+   * from these addresses, so the fee rides along instead of paying for its own.
+   * Absent = payouts behave exactly as before and the fee stays accrued.
+   */
+  feeTreasuryAddressFor?: (chain: string) => string | undefined;
+  /** Below this, a residual is left where it is rather than spending gas to move it. */
+  feeSweepDustBaseUnits?: bigint;
   chains: ChainRouter;
   policy: PolicyEngine;
   webhookPoster: WebhookPoster;
@@ -73,6 +83,8 @@ const DEFAULT_ALLOWLIST_COOLDOWN_MS = 24 * 60 * 60_000;
 
 export interface Engine {
   sql: SqlClient;
+  /** Decides what the platform is owed and which addresses can settle it. */
+  feeSweepPlanner: FeeSweepPlanner;
   gatherConfig: GatherConfigStore;
   chains: ChainRouter;
   tenants: TenantStore;
@@ -107,6 +119,11 @@ export function buildEngine(cfg: EngineConfig): Engine {
     activeStrategy: (chain, tenant) => gatherConfig.activeFor(chain, tenant),
   });
   const gatherer = new PoolGatherer(pool, cfg.chains.balances);
+  const feeSweepPlanner = new FeeSweepPlanner(cfg.sql, pool, cfg.chains.balances, {
+    ...(cfg.feeSweepDustBaseUnits !== undefined
+      ? { dustThresholdBaseUnits: cfg.feeSweepDustBaseUnits }
+      : {}),
+  });
 
   // Authorization (§7): when a policy key is set, mint a token per payout and gate
   // the broadcaster on its sighash binding — the last-mile independent re-verify.
@@ -126,6 +143,9 @@ export function buildEngine(cfg: EngineConfig): Engine {
     ...(cfg.approvalsRequired !== undefined ? { approvalsRequired: cfg.approvalsRequired } : {}),
     ...(authorizer ? { authorizer } : {}),
     ...(cfg.gatherStrategies ? { gatherStrategies: cfg.gatherStrategies } : {}),
+    ...(cfg.feeTreasuryAddressFor
+      ? { feeSweep: { planner: feeSweepPlanner, treasuryAddressFor: cfg.feeTreasuryAddressFor } }
+      : {}),
   });
   const ingestor = new DepositIngestor(
     ledger,
@@ -144,6 +164,7 @@ export function buildEngine(cfg: EngineConfig): Engine {
 
   return {
     sql: cfg.sql,
+    feeSweepPlanner,
     gatherConfig,
     chains: cfg.chains,
     tenants: new TenantStore(cfg.sql),

@@ -20,166 +20,337 @@
  */
 
 /**
- * The whole visual system for both consoles. Each SPA supplies only its accent
- * hue (admin blue, portal teal) — everything structural is shared, so the two
- * cannot drift apart the way two hand-maintained copies of the same 50 lines do.
+ * The whole visual system for both consoles — a port of egofi's "Gulf of Guinea"
+ * design tokens (`@egofi/ui/tailwind-preset`) to plain CSS, so the custody engine
+ * and the gateway that fronts it read as one product family.
+ *
+ * The port keeps egofi's load-bearing idea rather than just its hex codes: **the
+ * navy ramp is inverted under dark**, so `--navy-900` means "ink" and
+ * `--navy-100` means "hairline" in both themes. Every semantic token below is
+ * derived from that ramp through `var()`, which resolves at use time — so one
+ * set of component rules serves light and dark with no per-element overrides.
+ *
+ * Theme resolves in three states, matching egofi: the OS preference by default,
+ * overridden by `data-theme` on `<html>` when the operator picks one (persisted
+ * in localStorage by `initTheme()` in the JS half).
+ *
+ * Each SPA supplies only its accent hue — admin takes primary blue, the tenant
+ * portal takes info sky — so the two stay distinguishable inside one system
+ * without being able to drift apart.
  */
 export const UI_KIT_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
+/* ── Egofi tokens: light ──────────────────────────────────────────────────── */
 :root{
-  --bg:#07090e; --panel:rgba(15,21,30,0.85); --panel2:rgba(22,30,44,0.9); --raised:#1b2434;
-  --line:rgba(255,255,255,0.08); --line2:rgba(255,255,255,0.16);
-  --fg:#f8fafc; --fg2:#cbd5e1; --muted:#94a3b8; --faint:#64748b;
-  --ok:#10b981; --ok-bg:rgba(16,185,129,0.15);
-  --warn:#f59e0b; --warn-bg:rgba(245,158,11,0.15);
-  --bad:#ef4444; --bad-bg:rgba(239,68,68,0.15);
-  --accent-glow:rgba(45,212,191,0.3);
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
-  --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  --display:'Outfit','Inter',sans-serif;
-  --r:14px; --r-sm:9px;
-  --shadow:0 12px 40px rgba(0,0,0,0.6),0 2px 10px rgba(0,0,0,0.3);
-  --glass-bg:rgba(15,21,30,0.75);
-  --glass-border:1px solid rgba(255,255,255,0.1);
+  color-scheme:light;
+  --navy-50:241 245 250;   --navy-100:225 233 243; --navy-200:195 211 231;
+  --navy-300:147 174 207;  --navy-400:91 128 176;  --navy-500:55 93 146;
+  --navy-600:37 68 117;    --navy-700:24 50 92;    --navy-800:14 36 73;
+  --navy-900:7 28 61;      --navy-950:4 15 38;
+  --surface:255 255 255; --surface-raised:255 255 255; --canvas:246 248 252;
+
+  --primary:29 78 216; --info:14 165 233; --accent-lime:163 230 53;
+  --success:74 222 128; --warning:245 158 11; --danger-rgb:251 113 133;
+
+  /* "ink" = the readable-on-this-background form of each hue. Only these flip. */
+  --primary-ink:29 78 216; --info-ink:2 132 199;  --lime-ink:63 98 18;
+  --success-ink:22 101 52; --warning-ink:180 83 9; --danger-ink:190 18 60;
+
+  --shadow-tint:7 28 61;
+  --sidebar-fg:226 235 247;
 }
+
+/* ── Egofi tokens: dark (the ramp inverts; hues brighten) ─────────────────── */
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --navy-50:22 34 54;     --navy-100:30 45 70;    --navy-200:44 62 92;
+    --navy-300:92 114 147;  --navy-400:122 144 177; --navy-500:150 170 200;
+    --navy-600:178 195 220; --navy-700:200 214 234; --navy-800:216 228 243;
+    --navy-900:233 240 249; --navy-950:244 248 252;
+    --surface:17 28 47; --surface-raised:24 37 60; --canvas:8 18 33;
+    --primary-ink:96 165 250; --info-ink:56 189 248;  --lime-ink:163 230 53;
+    --success-ink:74 222 128; --warning-ink:251 191 36; --danger-ink:251 113 133;
+    --shadow-tint:2 6 16;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --navy-50:22 34 54;     --navy-100:30 45 70;    --navy-200:44 62 92;
+  --navy-300:92 114 147;  --navy-400:122 144 177; --navy-500:150 170 200;
+  --navy-600:178 195 220; --navy-700:200 214 234; --navy-800:216 228 243;
+  --navy-900:233 240 249; --navy-950:244 248 252;
+  --surface:17 28 47; --surface-raised:24 37 60; --canvas:8 18 33;
+  --primary-ink:96 165 250; --info-ink:56 189 248;  --lime-ink:163 230 53;
+  --success-ink:74 222 128; --warning-ink:251 191 36; --danger-ink:251 113 133;
+  --shadow-tint:2 6 16;
+}
+
+/* Surfaces that are ALWAYS dark (the sidebar) pin the ramp to its light values,
+   exactly as egofi's \`.on-dark\` does: there, low-index navy is light ink on a
+   dark ground and must not invert. */
+.on-dark{
+  --navy-50:241 245 250;   --navy-100:225 233 243; --navy-200:195 211 231;
+  --navy-300:147 174 207;  --navy-400:91 128 176;  --navy-500:55 93 146;
+  --navy-600:37 68 117;    --navy-700:24 50 92;    --navy-800:14 36 73;
+  --navy-900:7 28 61;      --navy-950:4 15 38;
+}
+
+/* ── Semantics, derived from the ramp (resolved at use time, so they flip) ── */
+:root{
+  --bg:rgb(var(--canvas));
+  --panel:rgb(var(--surface));
+  --panel2:rgb(var(--navy-50));
+  --raised:rgb(var(--surface-raised));
+  --fg:rgb(var(--navy-950));
+  --fg2:rgb(var(--navy-700));
+  --muted:rgb(var(--navy-500));
+  --faint:rgb(var(--navy-400));
+  --line:rgb(var(--navy-100));
+  --line2:rgb(var(--navy-200));
+
+  --cyan:rgb(var(--primary-ink));
+  --purple:rgb(var(--info-ink));
+  --green:rgb(var(--success-ink));
+  --orange:rgb(var(--warning-ink));
+  --ok:rgb(var(--success-ink));   --ok-bg:color-mix(in srgb,rgb(var(--success)) 16%,transparent);
+  --warn:rgb(var(--warning-ink)); --warn-bg:color-mix(in srgb,rgb(var(--warning)) 16%,transparent);
+  --bad:rgb(var(--danger-ink));   --bad-bg:color-mix(in srgb,rgb(var(--danger-rgb)) 16%,transparent);
+
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --display:var(--sans);
+
+  /* Flat / square, per egofi's borderRadius override. \`--r-pill\` is kept so
+     genuine circles and pill badges stay round rather than becoming squares. */
+  --r:0; --r-sm:0; --r-pill:9999px;
+
+  --shadow-xs:0 1px 2px 0 rgb(var(--shadow-tint) / 0.04);
+  --shadow-card:0 1px 2px 0 rgb(var(--shadow-tint) / 0.04),0 6px 20px -6px rgb(var(--shadow-tint) / 0.10);
+  --shadow-card-hover:0 2px 4px 0 rgb(var(--shadow-tint) / 0.06),0 14px 32px -8px rgb(var(--shadow-tint) / 0.16);
+  --shadow:0 24px 60px -16px rgb(var(--shadow-tint) / 0.28);
+  --accent-glow:color-mix(in srgb,var(--accent) 22%,transparent);
+  --glass-border:1px solid rgb(var(--navy-100));
+
+  --brand-gradient:radial-gradient(120% 120% at 0% 0%,#0E2449 0%,#071C3D 45%,#040F26 100%);
+  --brand-mesh:radial-gradient(60% 40% at 100% 0%,rgba(29,78,216,0.05) 0%,transparent 60%),
+               radial-gradient(50% 40% at 0% 8%,rgba(14,165,233,0.05) 0%,transparent 55%);
+}
+
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:radial-gradient(ellipse at 50% 0%,#111c2e 0%,#07090e 80%);color:var(--fg);
-  font:14px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-a{color:var(--accent);text-decoration:none;transition:color .15s}
-a:hover{color:var(--accent-hi);text-decoration:none}
-h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
-::selection{background:color-mix(in srgb,var(--accent) 40%,transparent)}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+body{margin:0;background-color:var(--bg);background-image:var(--brand-mesh);background-attachment:fixed;
+  color:var(--fg);font:14px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  font-feature-settings:"cv02","cv03","cv04","cv11","ss01"}
+a{color:var(--accent-ink,var(--accent));text-decoration:none;transition:color .15s}
+a:hover{color:var(--accent-hi)}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.02em;color:rgb(var(--navy-950))}
+::selection{background:color-mix(in srgb,var(--accent) 28%,transparent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-@keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-@keyframes pulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.3;transform:scale(0.85)} }
-@keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+@keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+@keyframes pulseDot { 0%,100%{opacity:1} 50%{opacity:.45} }
+@keyframes shimmer { 100%{transform:translateX(100%)} }
 
 /* ── Controls ────────────────────────────────────────────────────────────── */
-button{font:600 13px/1.2 var(--sans);cursor:pointer;border:var(--glass-border);
-  background:var(--raised);color:var(--fg);border-radius:var(--r-sm);padding:9.5px 16px;
-  transition:all .2s cubic-bezier(0.16, 1, 0.3, 1);white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.15)}
-button:hover{background:#253246;border-color:rgba(255,255,255,0.25);transform:translateY(-1.5px);box-shadow:0 6px 16px rgba(0,0,0,0.3)}
-button:active{transform:translateY(0)}
-button:disabled{opacity:.5;cursor:not-allowed;transform:none}
-button.primary{background:linear-gradient(135deg,var(--accent),var(--accent-hi));border:none;color:#041119;font-weight:700;box-shadow:0 4px 18px var(--accent-glow)}
-button.primary:hover{box-shadow:0 6px 24px color-mix(in srgb,var(--accent) 55%,transparent);transform:translateY(-1.5px)}
-button.danger{background:transparent;border-color:color-mix(in srgb,var(--bad) 45%,transparent);color:var(--bad)}
+/* \`.button\` rides along so an <a> that acts as a button (the block-explorer
+   link) is not left as bare underlined text. */
+button,.button{font:500 14px/1.2 var(--sans);cursor:pointer;height:36px;padding:0 16px;
+  background:var(--panel);color:rgb(var(--navy-800));border:1px solid rgb(var(--navy-200));
+  border-radius:var(--r-sm);box-shadow:var(--shadow-xs);white-space:nowrap;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  transition:background .15s,box-shadow .15s,border-color .15s,transform .1s}
+button:hover,.button:hover{background:rgb(var(--navy-50));border-color:rgb(var(--navy-300))}
+button:active,.button:active{transform:scale(.98)}
+button:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+button.primary,.button.primary{background:var(--accent);color:var(--accent-fg,#fff);border-color:transparent;font-weight:600;
+  box-shadow:0 1px 3px 0 rgb(var(--shadow-tint) / 0.20)}
+button.primary:hover,.button.primary:hover{background:var(--accent-hi);box-shadow:0 4px 12px -2px var(--accent-glow)}
+button.danger{background:transparent;border-color:color-mix(in srgb,var(--bad) 40%,transparent);color:var(--bad)}
 button.danger:hover{background:var(--bad-bg);border-color:var(--bad)}
-input,select,textarea{font:14px var(--sans);background:rgba(7,9,14,0.8);border:var(--glass-border);
-  color:var(--fg);border-radius:var(--r-sm);padding:10.5px 14px;transition:all .18s ease;backdrop-filter:blur(8px)}
-input:hover,select:hover,textarea:hover{border-color:rgba(255,255,255,0.22)}
+input,select,textarea{font:14px var(--sans);background:var(--panel);border:1px solid rgb(var(--navy-200));
+  color:var(--fg);border-radius:var(--r-sm);padding:8px 12px;height:36px;transition:border-color .15s,box-shadow .15s}
+textarea{height:auto}
+input:hover,select:hover,textarea:hover{border-color:rgb(var(--navy-300))}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
-  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
 input::placeholder,textarea::placeholder{color:var(--faint)}
 
-/* ── Top Navigation Bar ─────────────────────────────────────────────────── */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;
-  background:rgba(15,21,30,0.7);backdrop-filter:blur(16px);border-bottom:1px solid var(--line);
-  position:sticky;top:0;z-index:40;margin-bottom:24px}
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 28px;
+  background:color-mix(in srgb,var(--panel) 82%,transparent);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40;margin-bottom:24px;flex-wrap:wrap}
 .topbar-left{display:flex;align-items:center;gap:16px}
-.status-pill{display:flex;align-items:center;gap:8px;padding:5px 12px;background:rgba(16,185,129,0.12);
-  border:1px solid rgba(16,185,129,0.3);border-radius:20px;font-size:12px;font-weight:600;color:#34d399}
-.status-dot{width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 8px #10b981;animation:pulseDot 2s infinite ease-in-out}
+.status-pill{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border-radius:var(--r-pill);
+  background:var(--ok-bg);border:1px solid color-mix(in srgb,rgb(var(--success)) 35%,transparent);
+  font-size:12px;font-weight:500;color:var(--ok)}
+.status-dot{width:6px;height:6px;border-radius:var(--r-pill);background:currentColor;animation:pulseDot 2s infinite ease-in-out}
 .top-search{position:relative;width:240px}
-.top-search input{width:100%;padding-left:32px;font-size:12.5px;height:34px;border-radius:18px;background:rgba(0,0,0,0.4)}
+.top-search input{width:100%;padding-left:32px;font-size:13px;height:34px}
+.theme-toggle{width:32px;height:32px;padding:0;font-size:14px;flex:none}
+
+/* ── Timeframe filter & timezone chip ────────────────────────────────────── */
+.timeframe-group{display:inline-flex;gap:2px;background:rgb(var(--navy-50));padding:3px;border:1px solid var(--line)}
+.tf-btn{height:28px;padding:0 12px;font-size:12.5px;font-weight:500;border:1px solid transparent;
+  background:transparent;color:var(--muted);box-shadow:none}
+.tf-btn:hover{color:var(--fg);background:color-mix(in srgb,var(--panel) 70%,transparent);border-color:transparent}
+.tf-btn.active{background:var(--panel);border-color:rgb(var(--navy-200));color:var(--accent-ink,var(--accent));
+  font-weight:600;box-shadow:var(--shadow-xs)}
+.tz-badge{display:inline-flex;align-items:center;gap:6px;padding:0 12px;height:34px;
+  background:rgb(var(--navy-50));border:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 
 /* ── Sign-in ─────────────────────────────────────────────────────────────── */
-.login{max-width:400px;margin:10vh auto;padding:36px;background:var(--panel);backdrop-filter:blur(16px);
-  border:1px solid var(--line2);border-radius:16px;box-shadow:var(--shadow);animation:fadeIn .25s ease-out}
-.login .mark{width:38px;height:38px;border-radius:11px;margin-bottom:18px;
-  background:linear-gradient(135deg,var(--accent),var(--accent-hi));
-  display:flex;align-items:center;justify-content:center;color:#08131f;font-weight:800;font-size:18px;box-shadow:0 4px 16px var(--accent-glow)}
-.login h1{font-size:22px;margin:0 0 6px;font-weight:700}
+.login{max-width:400px;margin:12vh auto;padding:36px;background:var(--panel);
+  border:1px solid var(--line);box-shadow:var(--shadow);animation:fadeIn .3s cubic-bezier(0.22,1,0.36,1) both}
+.login .mark{width:42px;height:42px;margin-bottom:18px;background:var(--brand-gradient);
+  display:flex;align-items:center;justify-content:center;color:rgb(var(--accent-lime));
+  font-weight:800;font-size:20px}
+.login h1{font-size:1.75rem;line-height:2.125rem;letter-spacing:-.02em;margin:0 0 6px;font-weight:700}
 .login p{color:var(--muted);margin:0 0 22px;font-size:13.5px;line-height:1.55}
 .login input{width:100%;margin-bottom:14px}
-.login button{width:100%;padding:11px}
+.login button{width:100%;height:44px}
 .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:10px}
 
-/* ── Shell ───────────────────────────────────────────────────────────────── */
-.shell{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
-.side{background:var(--panel);backdrop-filter:blur(16px);border-right:1px solid var(--line);padding:18px 14px;
-  display:flex;flex-direction:column;gap:3px;position:sticky;top:0;height:100vh;overflow-y:auto}
+/* ── Shell & sidebar ─────────────────────────────────────────────────────── */
+.shell{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
+.side{background:var(--brand-gradient);border-right:1px solid rgba(255,255,255,0.06);padding:20px 14px;
+  display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow-y:auto;
+  color:var(--sidebar-fg)}
 .brand{display:flex;align-items:center;gap:12px;padding:6px 10px 22px}
-.brand .mark{width:32px;height:32px;border-radius:9px;flex:none;
-  background:linear-gradient(135deg,var(--accent),var(--accent-hi));
-  display:flex;align-items:center;justify-content:center;color:#08131f;font-weight:800;font-size:15px;box-shadow:0 4px 14px var(--accent-glow)}
-.brand b{display:block;font-size:15px;font-weight:700;letter-spacing:-.01em;line-height:1.25}
-.brand small{display:block;color:var(--muted);font-weight:500;font-size:11px;line-height:1.3}
-.nav{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:var(--r-sm);
-  color:var(--fg2);cursor:pointer;font-size:13.5px;font-weight:500;
-  transition:all .15s ease;user-select:none}
-.nav svg{width:17px;height:17px;flex:none;opacity:.75;transition:transform .15s}
-.nav:hover{background:var(--panel2);color:var(--fg);transform:translateX(2px)}
-.nav:hover svg{opacity:1;transform:scale(1.1)}
-.nav.active{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 20%,transparent),transparent);
-  color:var(--fg);border-left:3px solid var(--accent);font-weight:600}
-.nav.active svg{opacity:1;color:var(--accent)}
+.brand .mark{width:36px;height:36px;flex:none;background:rgb(var(--accent-lime));
+  display:flex;align-items:center;justify-content:center;color:#1A2E05;font-weight:800;font-size:17px}
+.brand b{display:block;font-size:15px;font-weight:700;letter-spacing:-.01em;line-height:1.25;color:#fff}
+.brand small{display:block;color:rgba(226,235,247,0.62);font-weight:400;font-size:11px;line-height:1.3}
+
+.nav-group-title{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;
+  padding:16px 12px 6px;color:rgba(226,235,247,0.45)}
+
+.nav{display:flex;align-items:center;gap:11px;padding:9px 12px;color:rgba(226,235,247,0.78);
+  cursor:pointer;font-size:13.5px;font-weight:500;user-select:none;
+  border-left:2px solid transparent;transition:background .15s,color .15s}
+.nav svg{width:18px;height:18px;flex:none;opacity:.75}
+.nav:hover{background:rgba(255,255,255,0.06);color:#fff}
+.nav:hover svg{opacity:1}
+.nav.active{background:rgba(255,255,255,0.10);color:#fff;border-left-color:rgb(var(--accent-lime));font-weight:600}
+.nav.active svg{opacity:1;color:rgb(var(--accent-lime))}
+
 .side .spacer{flex:1}
-.side>button{margin-top:6px;width:100%}
-.main{padding:0 34px 60px;overflow:auto;min-width:0;animation:fadeIn .25s ease-out}
-.head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}
-.head h2{margin:0;font-size:24px;font-weight:700;background:linear-gradient(135deg,#fff,#cbd5e1);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.side button{background:rgba(255,255,255,0.07);border-color:rgba(255,255,255,0.14);color:rgba(226,235,247,0.9);box-shadow:none}
+.side button:hover{background:rgba(255,255,255,0.13);border-color:rgba(255,255,255,0.22);color:#fff}
+.side-foot{border-top:1px solid rgba(255,255,255,0.08);padding-top:12px;margin-top:12px;
+  display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.side-foot .spacer{flex:1;min-width:0}
+.side-foot-item{display:flex;align-items:center;gap:6px;font-size:11.5px;color:rgba(226,235,247,0.6)}
+.side-foot-item .dot{width:6px;height:6px;border-radius:var(--r-pill)}
+.side-foot-item .dot.blue{background:#38BDF8}
+.side-foot-item .dot.green{background:rgb(var(--success))}
+.env-pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:3px 10px;
+  border-radius:var(--r-pill);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;
+  background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.4);color:rgb(var(--success))}
+.env-pill.testnet{background:rgba(245,158,11,0.12);border-color:rgba(245,158,11,0.45);color:#FBBF24}
+
+/* The gutter lives on the scroll container, not on one named child: the admin
+   console writes screens straight into \`.main\` while the portal wraps them in
+   \`#content-body\`, and hanging the padding off the wrapper left admin's cards
+   running under the sidebar and off the right edge. \`.topbar\` opts back out
+   because it is a full-bleed sticky bar. */
+/* The gutter lives on the scroll container, so every screen gets it whichever
+   way its console renders: the admin console writes straight into \`.main\`, the
+   portal wraps its screens in \`#content-body\`. Hanging it off the wrapper left
+   admin's cards flush against the sidebar and clipped off the right edge, and
+   padding the children instead only insets their text — a panel or banner has a
+   background, so its box would still have run edge to edge.
+   The sticky topbar cancels the gutter back out, since it is full-bleed. */
+.main{padding:0 34px 60px;overflow:auto;min-width:0}
+.main>.topbar{margin-left:-34px;margin-right:-34px}
+#content-body{padding:0}
+/* Long lines are unreadable on an ultrawide, so content stops widening before
+   the window does. */
+.main>*:not(.topbar),#content-body>*{max-width:1560px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  margin:6px 0 24px;flex-wrap:wrap;animation:fadeIn .4s cubic-bezier(0.22,1,0.36,1) both}
+.head h2{margin:0;font-size:1.75rem;line-height:2.125rem;letter-spacing:-.02em;font-weight:700}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 
-/* ── Cards ───────────────────────────────────────────────────────────────── */
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin-bottom:24px}
-.card{background:var(--panel);backdrop-filter:blur(12px);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;
-  transition:all .2s cubic-bezier(0.16, 1, 0.3, 1);box-shadow:0 4px 20px rgba(0,0,0,0.25);position:relative;overflow:hidden}
-.card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0;transition:opacity .2s}
-.card:hover{border-color:rgba(45,212,191,0.4);transform:translateY(-3px) scale(1.01);box-shadow:0 12px 30px rgba(0,0,0,0.4),0 0 15px var(--accent-glow)}
-.card:hover::before{opacity:1}
-.card .k{color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px}
-.card .v{font-size:27px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+/* ── Metric cards ────────────────────────────────────────────────────────── */
+.nexis-cards,.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}
+.nexis-card,.card{background:var(--panel);border:1px solid color-mix(in srgb,rgb(var(--navy-100)) 80%,transparent);
+  padding:20px 22px;box-shadow:var(--shadow-card);position:relative;overflow:hidden;
+  transition:box-shadow .2s,transform .2s,border-color .2s;animation:fadeIn .4s cubic-bezier(0.22,1,0.36,1) both}
+.nexis-card:hover,.card:hover{transform:translateY(-2px);box-shadow:var(--shadow-card-hover);border-color:rgb(var(--navy-200))}
+/* A 2px hue rule along the top edge is the only colour a card carries — the
+   surface itself stays neutral so a wall of cards does not read as a rainbow. */
+.nexis-card::before{content:'';position:absolute;inset:0 0 auto 0;height:2px;background:var(--card-hue,transparent)}
+.nexis-card.orders,.nexis-card.cyan{--card-hue:rgb(var(--primary))}
+.nexis-card.amount,.nexis-card.green{--card-hue:rgb(var(--success))}
+.nexis-card.currencies,.nexis-card.purple{--card-hue:rgb(var(--info))}
+.nexis-card.blockchains,.nexis-card.orange{--card-hue:rgb(var(--warning))}
+.nexis-card.bad{--card-hue:rgb(var(--danger-rgb))}
 
-/* ── Panels + tables ─────────────────────────────────────────────────────── */
-.panel{background:var(--panel);backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:var(--r);
-  overflow:hidden;margin-bottom:24px;box-shadow:0 6px 24px rgba(0,0,0,0.3)}
-.panel h3{margin:0;padding:15px 20px;font-size:12.5px;color:var(--fg2);font-weight:700;
-  border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.7px;background:rgba(255,255,255,0.02)}
+.nexis-card-head{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11.5px;
+  font-weight:600;text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px}
+.nexis-card-head .icon-box{width:26px;height:26px;display:flex;align-items:center;justify-content:center;
+  background:rgb(var(--navy-50));border:1px solid var(--line);font-size:14px}
+.nexis-card-val,.card .v{font-size:1.75rem;line-height:2.125rem;font-weight:700;font-family:var(--display);
+  font-variant-numeric:tabular-nums;letter-spacing:-.025em;color:rgb(var(--navy-950));margin-bottom:6px}
+.card .k{color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+
+.nexis-sub-item{margin-top:8px;font-size:12.5px;line-height:1.4}
+.nexis-sub-title{font-weight:600;display:flex;align-items:center;gap:6px;color:rgb(var(--navy-800))}
+.nexis-sub-title.cyan{color:var(--cyan)}
+.nexis-sub-title.orange{color:var(--orange)}
+.nexis-sub-desc{color:var(--faint);font-size:11.5px;margin-top:2px}
+
+/* ── Panels & tables ─────────────────────────────────────────────────────── */
+.panel{background:var(--panel);border:1px solid color-mix(in srgb,rgb(var(--navy-100)) 80%,transparent);
+  overflow:hidden;margin-bottom:24px;box-shadow:var(--shadow-card);
+  animation:fadeIn .4s cubic-bezier(0.22,1,0.36,1) both}
+.panel h3{margin:0;padding:15px 20px;font-size:12.5px;color:rgb(var(--navy-700));font-weight:600;
+  border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.7px;background:rgb(var(--navy-50))}
 .tablewrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:13px 20px;border-bottom:1px solid var(--line);vertical-align:middle}
-th{color:var(--muted);font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;
-  background:rgba(15,21,30,0.95);position:sticky;top:0;z-index:1;white-space:nowrap}
+th,td{text-align:left;padding:12px 20px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;
+  background:rgb(var(--navy-50));position:sticky;top:0;z-index:1;white-space:nowrap}
 tbody tr{transition:background .15s}
-tbody tr:hover{background:rgba(255,255,255,0.03)}
+tbody tr:hover{background:rgb(var(--navy-50) / 0.6)}
 tbody tr:last-child td{border-bottom:none}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 td.mono,.mono{font-family:var(--mono);font-size:12px}
 .muted{color:var(--muted)}
 .actions{white-space:nowrap}
-.actions button{padding:5px 10px;font-size:12px;margin-left:6px}
+.actions button{height:28px;padding:0 10px;font-size:12.5px;margin-left:6px}
 .actions button:first-child{margin-left:0}
 .empty{padding:34px 26px;text-align:center;color:var(--muted);font-size:13.5px}
-.hint{color:var(--muted);font-size:12.5px;padding:12px 18px;margin:0;border-top:1px solid var(--line);line-height:1.55}
+.hint{color:var(--muted);font-size:12.5px;padding:12px 20px;margin:0;border-top:1px solid var(--line);line-height:1.55}
 .panel>.hint:first-child{border-top:none}
 
 /* ── Badges ──────────────────────────────────────────────────────────────── */
-.badge{display:inline-block;padding:3px 9px;border-radius:6px;font-size:11.5px;font-weight:600;
-  border:1px solid transparent;white-space:nowrap;line-height:1.35}
-.badge.ok{color:#69d97c;background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
-.badge.warn{color:#e8bc55;background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
-.badge.bad{color:#ff7d76;background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 30%,transparent)}
-.badge.muted{color:var(--fg2);background:var(--panel2);border-color:var(--line2)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:var(--r-pill);
+  font-size:12px;font-weight:500;border:1px solid transparent;white-space:nowrap;line-height:1.5}
+.badge.ok{color:var(--ok);background:var(--ok-bg);border-color:color-mix(in srgb,rgb(var(--success)) 35%,transparent)}
+.badge.warn{color:var(--warn);background:var(--warn-bg);border-color:color-mix(in srgb,rgb(var(--warning)) 35%,transparent)}
+.badge.bad{color:var(--bad);background:var(--bad-bg);border-color:color-mix(in srgb,rgb(var(--danger-rgb)) 35%,transparent)}
+.badge.muted{color:rgb(var(--navy-700));background:rgb(var(--navy-50));border-color:var(--line2)}
+.ai-chip{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:var(--r-pill);
+  font-size:12px;font-weight:500;background:color-mix(in srgb,rgb(var(--info)) 14%,transparent);
+  border:1px solid color-mix(in srgb,rgb(var(--info)) 32%,transparent);color:var(--purple)}
 
 /* ── Banners ─────────────────────────────────────────────────────────────── */
-.banner{padding:12px 16px;border-radius:var(--r-sm);margin-bottom:18px;font-weight:500;font-size:13.5px;
-  border:1px solid;line-height:1.5}
-.banner.bad{background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 40%,transparent);color:#ff9d97}
-.banner.ok{background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 35%,transparent);color:#8ae79b}
-.banner.warn{background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 40%,transparent);color:#eccb74}
+.banner{padding:12px 16px;margin-bottom:18px;font-weight:400;font-size:13.5px;border:1px solid;line-height:1.5}
+.banner.ok{background:var(--ok-bg);border-color:color-mix(in srgb,rgb(var(--success)) 35%,transparent);color:var(--ok)}
+.banner.warn{background:var(--warn-bg);border-color:color-mix(in srgb,rgb(var(--warning)) 38%,transparent);color:var(--warn)}
+.banner.bad{background:var(--bad-bg);border-color:color-mix(in srgb,rgb(var(--danger-rgb)) 38%,transparent);color:var(--bad)}
 
 /* ── Money + account cells ───────────────────────────────────────────────── */
-.amount{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:550}
+.amount{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:500}
 .amount .sym{color:var(--muted);font-size:.82em;margin-left:4px;font-weight:400}
-.pos{color:var(--fg)} .neg{color:var(--fg)}
+.pos,.neg{color:var(--fg)}
 /* The name and the raw key are separate LINES. Both are spans, so they need an
    explicit block — inline is what made them collide into one run of text. */
 .acct{display:block;min-width:0}
-.acct .name{display:block;font-weight:550;line-height:1.35}
+.acct .name{display:block;font-weight:500;line-height:1.35}
 .acct .sub{display:block;color:var(--faint);font-family:var(--mono);font-size:10.5px;
   line-height:1.4;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34ch}
 .movement{display:flex;align-items:baseline;gap:10px;padding:3px 0}
@@ -187,84 +358,425 @@ td.mono,.mono{font-family:var(--mono);font-size:12px}
   letter-spacing:.4px;font-weight:600}
 .movement .amt{min-width:118px;text-align:right}
 
+/* ── Journal entries ─────────────────────────────────────────────────────── */
+/* A journal entry is ONE event with several postings, and it used to render as
+   several free-floating lines whose amounts, directions and account names never
+   lined up — three columns of drift per row. Everything now sits on one grid,
+   so amounts share a right edge and account names share a left one no matter
+   how many postings an entry carries. */
+/* The event column sizes to its content so the postings take the slack, instead
+   of the old four-column split where the two narrow columns took it. */
+.col-event{width:1%;white-space:nowrap;vertical-align:top;padding-top:16px}
+.entry-what{display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+.entry-meta{display:flex;align-items:center;gap:7px;flex-wrap:nowrap;color:var(--faint);font-size:11.5px}
+.entry-meta .ref{font-family:var(--mono);font-size:11px}
+.entry-meta .sep{opacity:.5}
+
+.flow{display:grid;grid-template-columns:minmax(96px,auto) auto minmax(0,1fr);
+  gap:2px 14px;align-items:baseline}
+.flow-amt{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* The direction chip is what tells a reader which way value moved; as 11px grey
+   caps it was the least visible thing in the row despite being the point. */
+.flow-dir{justify-self:start;font-size:10.5px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.5px;padding:1px 7px;border-radius:var(--r-pill);border:1px solid transparent;white-space:nowrap}
+.flow-dir.in{color:var(--ok);background:var(--ok-bg);border-color:color-mix(in srgb,rgb(var(--success)) 30%,transparent)}
+.flow-dir.out{color:var(--warn);background:var(--warn-bg);border-color:color-mix(in srgb,rgb(var(--warning)) 30%,transparent)}
+/* \`display:contents\` dissolves the row wrapper so its three spans become grid
+   items of \`.flow\` itself — that is what keeps every posting on the same three
+   columns without a subgrid. */
+.flow-row{display:contents}
+.flow-row.lead>*{padding-bottom:7px}
+.flow-row.lead .flow-amt{font-size:15px;font-weight:600;color:rgb(var(--navy-950))}
+.flow-row.lead .acct .name{font-weight:600}
+/* The lead posting is the event's headline; the rest are the split it was
+   broken into. The hairline runs across all three columns, so the grouping is
+   structural rather than something the reader has to infer. */
+.flow-row.split-start>*{border-top:1px dashed var(--line2);padding-top:8px}
+.flow-row.split>*{padding-block:2px}
+.flow-row.split .flow-amt{font-size:13px;color:var(--fg2)}
+.flow-row.split .acct .name{color:var(--fg2);font-weight:400}
+
 /* ── Forms ───────────────────────────────────────────────────────────────── */
-.form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;padding:16px 18px}
+.form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;padding:16px 20px}
 .form label{display:flex;flex-direction:column;gap:5px;font-size:11.5px;color:var(--muted);
   font-weight:600;text-transform:uppercase;letter-spacing:.4px}
 
 /* ── Modal ───────────────────────────────────────────────────────────────── */
-.modal-back{position:fixed;inset:0;background:rgba(4,7,11,.72);backdrop-filter:blur(3px);
-  display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;
-  animation:fade .14s ease-out}
+.modal-back{position:fixed;inset:0;background:rgb(var(--navy-950) / 0.55);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;animation:fade .14s ease-out}
 @keyframes fade{from{opacity:0}to{opacity:1}}
-@keyframes rise{from{opacity:0;transform:translateY(6px) scale(.995)}to{opacity:1;transform:none}}
-.modal{background:var(--panel);border:1px solid var(--line2);border-radius:13px;max-width:580px;
-  width:100%;max-height:90vh;overflow:auto;box-shadow:0 24px 60px rgba(0,0,0,.6);
-  animation:rise .16s ease-out}
+@keyframes rise{from{opacity:0;transform:translateY(10px) scale(.995)}to{opacity:1;transform:none}}
+.modal{background:var(--panel);border:1px solid var(--line2);max-width:580px;width:100%;
+  max-height:90vh;overflow:auto;box-shadow:var(--shadow);animation:rise .2s cubic-bezier(0.22,1,0.36,1)}
 .modal header{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;
   align-items:center;justify-content:space-between;gap:12px}
-.modal header h3{margin:0;font-size:16px;font-weight:650}
+.modal header h3{margin:0;font-size:1.125rem;font-weight:600;letter-spacing:-.01em}
 .modal .body{padding:20px}
+.modal .body h4{margin:0 0 8px;font-size:13px;font-weight:600}
 .modal .foot{padding:15px 20px;border-top:1px solid var(--line);display:flex;gap:10px;
-  justify-content:flex-end;flex-wrap:wrap;background:var(--panel2)}
-.modal .x{background:none;border:none;color:var(--muted);font-size:22px;line-height:1;padding:2px 6px}
-.modal .x:hover{background:var(--panel2);color:var(--fg)}
+  justify-content:flex-end;flex-wrap:wrap;background:rgb(var(--navy-50))}
+.modal .x{background:none;border:none;color:var(--muted);font-size:22px;line-height:1;
+  height:28px;width:28px;padding:0;box-shadow:none}
+.modal .x:hover{background:rgb(var(--navy-100));color:var(--fg)}
 .modal .hint{border-top:none;padding:10px 0 0}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;align-items:baseline;margin:0 0 18px}
 .kv dt{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
 .kv dd{margin:0;font-family:var(--mono);font-size:12.5px;word-break:break-all}
-.secretbox{background:var(--bg);border:1px dashed color-mix(in srgb,var(--warn) 55%,transparent);
-  border-radius:var(--r-sm);padding:13px 14px;font-family:var(--mono);font-size:12.5px;
-  word-break:break-all;margin:8px 0 4px;line-height:1.6;color:#f0d79a}
-.warnnote{color:var(--warn);font-size:12px;margin:0 0 6px;font-weight:650;
+.faq{margin-bottom:8px;background:rgb(var(--navy-50));border:1px solid var(--line);padding:8px 12px}
+.faq summary{cursor:pointer;font-weight:600;color:var(--accent-ink,var(--accent))}
+.faq p{margin:6px 0 0;color:rgb(var(--navy-700))}
+.secretbox{background:rgb(var(--navy-50));border:1px dashed color-mix(in srgb,rgb(var(--warning)) 60%,transparent);
+  padding:13px 14px;font-family:var(--mono);font-size:12.5px;word-break:break-all;
+  margin:8px 0 4px;line-height:1.6;color:var(--warn)}
+.warnnote{color:var(--warn);font-size:12px;margin:0 0 6px;font-weight:600;
   text-transform:uppercase;letter-spacing:.5px}
+.detail{background:rgb(var(--navy-50));border:1px solid var(--line2);padding:14px;margin:0 20px 20px;
+  white-space:pre-wrap;word-break:break-all;font-family:var(--mono);font-size:12px;
+  line-height:1.6;max-height:340px;overflow:auto}
 
 /* ── Deposit-address sheet ───────────────────────────────────────────────── */
 .qrwrap{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
-.qrbox{background:#fff;padding:12px;border-radius:11px;line-height:0;flex:none;
-  box-shadow:0 2px 12px rgba(0,0,0,.35)}
+.qrbox{background:#fff;padding:12px;line-height:0;flex:none;border:1px solid var(--line2)}
 .qrbox canvas{display:block;width:184px;height:184px;image-rendering:pixelated}
 .qrside{flex:1;min-width:230px}
-.addr{font-family:var(--mono);font-size:12.5px;word-break:break-all;background:var(--bg);
-  border:1px solid var(--line2);border-radius:var(--r-sm);padding:11px 13px;margin-bottom:12px;
-  line-height:1.6;user-select:all}
+.addr{font-family:var(--mono);font-size:12.5px;word-break:break-all;background:rgb(var(--navy-50));
+  border:1px solid var(--line2);padding:11px 13px;margin-bottom:12px;line-height:1.6;user-select:all}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap}
-.btnrow button{padding:7px 11px;font-size:12.5px}
+.btnrow button{height:32px;padding:0 12px;font-size:12.5px}
+
+/* ── Activity chart ──────────────────────────────────────────────────────── */
+.chart-panel{background:var(--panel);border:1px solid color-mix(in srgb,rgb(var(--navy-100)) 80%,transparent);
+  padding:20px 22px;margin-bottom:24px;box-shadow:var(--shadow-card)}
+.chart-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.chart-header h3{margin:0;font-size:14px;font-weight:600}
+.chart-legend{display:flex;gap:14px;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.legend-dot{width:8px;height:8px;border-radius:var(--r-pill);flex:none}
+.stacked-bars-container{display:flex;align-items:flex-end;justify-content:space-around;gap:12px;height:170px}
+.bar-col{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;min-width:0}
+.bar-stack{display:flex;flex-direction:column;justify-content:flex-end;width:100%;max-width:44px;height:140px}
+.bar-seg{width:100%;transition:opacity .15s}
+.bar-seg:hover{opacity:.75}
+.bar-seg.payments{background:rgb(var(--success))}
+.bar-seg.donations{background:rgb(var(--warning))}
+.bar-seg.pending{background:rgb(var(--primary))}
+.bar-seg.partial{background:rgb(var(--accent-lime))}
+.bar-seg.expired{background:rgb(var(--navy-300))}
+.bar-label{font-size:11.5px;color:var(--muted);font-weight:500}
+
+/* ── Toasts ──────────────────────────────────────────────────────────────── */
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:99999;display:flex;
+  flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:rgb(var(--navy-950));color:rgb(var(--surface));padding:11px 18px;font-size:13.5px;
+  box-shadow:var(--shadow);display:flex;align-items:center;gap:10px;
+  animation:toastIn .22s cubic-bezier(0.22,1,0.36,1)}
+@keyframes toastIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
 
 @media (max-width:820px){
   .shell{grid-template-columns:1fr}
   .side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;
-    border-right:none;border-bottom:1px solid var(--line);padding:10px 12px}
+    border-right:none;border-bottom:1px solid rgba(255,255,255,0.08);padding:10px 12px}
   .brand{padding:0 12px 0 4px}
   .side .spacer{flex:0}
-  .side>button{width:auto;margin-top:0}
-  .main{padding:20px 16px 50px}
+  .side-foot{border-top:none;margin-top:0;padding-top:0;flex-direction:row;align-items:center;gap:12px}
+  .nav{border-left:none;border-bottom:2px solid transparent}
+  .nav.active{border-left-color:transparent;border-bottom-color:rgb(var(--accent-lime))}
+  .topbar{padding:12px 16px}
+  #content-body,.main>.head{padding-left:16px;padding-right:16px}
   th,td{padding:10px 12px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;
+    transition-duration:.01ms !important}
 }
 @media print{
   body{background:#fff;color:#000}
-  .side,.head button,.btnrow,.modal .foot,.nav{display:none !important}
+  .side,.topbar,.head button,.btnrow,.modal .foot,.nav{display:none !important}
   .modal-back{position:static;background:none;padding:0;backdrop-filter:none}
   .modal{border:none;box-shadow:none;max-width:none;max-height:none;animation:none}
-  .qrbox{border:1px solid #ccc;box-shadow:none}
+  .qrbox{border:1px solid #ccc}
   .addr{background:none;border:1px solid #ccc;color:#000}
 }
-
-/* ── Toast Notifications & Micro-Interactions ──────────────────────────────── */
-.toast-container{position:fixed;bottom:24px;right:24px;z-index:99999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{background:rgba(15,23,42,0.95);border:1px solid rgba(45,212,191,0.4);color:#f8fafc;padding:11px 18px;
-  border-radius:10px;font-size:13.5px;font-weight:500;box-shadow:0 12px 30px rgba(0,0,0,0.6);
-  display:flex;align-items:center;gap:10px;animation:toastIn 0.22s cubic-bezier(0.16,1,0.3,1);
-  pointer-events:auto;backdrop-filter:blur(10px)}
-@keyframes toastIn{from{opacity:0;transform:translateY(16px) scale(0.95)}to{opacity:1;transform:translateY(0) scale(1)}}
 `;
 
 export const UI_KIT_JS = String.raw`
-// ── Money, labels, and other display helpers ────────────────────────────────
+// ── Money, labels, and shared console components ─────────────────────────
+
+/**
+ * Theme resolution, matching egofi's three states: no attribute means "follow
+ * the OS", and an explicit choice stamps data-theme on <html> so the CSS
+ * override blocks win in both directions. Persisted per console.
+ */
+function initTheme(){
+  var saved=null;
+  try{saved=localStorage.getItem('cx_theme');}catch(e){}
+  if(saved==='dark'||saved==='light')document.documentElement.setAttribute('data-theme',saved);
+}
+function currentTheme(){
+  var attr=document.documentElement.getAttribute('data-theme');
+  if(attr)return attr;
+  return window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+}
+function toggleTheme(){
+  var next=currentTheme()==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',next);
+  try{localStorage.setItem('cx_theme',next);}catch(e){}
+  render();
+}
+
 var ASSETS={};
 /** Cache the API's asset table (symbol → decimals). Call before formatting money. */
 function setAssets(list){ASSETS={};for(var i=0;i<(list||[]).length;i++){var a=list[i];ASSETS[String(a.symbol).toUpperCase()]=a;}}
 function assetInfo(sym){return ASSETS[String(sym==null?'':sym).toUpperCase()]||null;}
+
+function renderStatGrid(cards){
+  var h = '<div class="nexis-cards">';
+  for(var i=0; i<(cards||[]).length; i++){
+    var c = cards[i];
+    var title = c.title || c[0] || '';
+    var val = c.value || c[1] || '0';
+    var sub = c.sub || c[2] || '';
+    var icon = c.icon || c[3] || '📈';
+    var color = c.color || c[4] || (i===0?'cyan':i===1?'green':i===2?'purple':'orange');
+    h += '<div class="nexis-card '+color+'">'+
+      '<div class="nexis-card-head"><div class="icon-box">'+icon+'</div><span>'+esc(title)+'</span></div>'+
+      '<div class="nexis-card-val">'+(typeof val==='string'&&val.indexOf('<')!==-1?val:esc(String(val)))+'</div>'+
+      // The caption stays muted. It was tinted to match the card's hue, which
+      // put four different colours of small text on one row and made the least
+      // important line the loudest — the hue already lives on the rule and icon.
+      (sub?'<div class="nexis-sub-desc">'+(typeof sub==='string'&&sub.indexOf('<')!==-1?sub:esc(String(sub)))+'</div>':'')+
+    '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+/**
+ * One journal entry's postings, laid on a single three-column grid.
+ *
+ * The debit — where value landed — leads, and the credits it was split into sit
+ * beneath a hairline. Every posting is still shown with its own direction and
+ * amount; this only groups them, because a deposit that credits a merchant and
+ * a fee account is one event, not three unrelated lines.
+ *
+ * An entry with no debit (or only one posting) degrades to a flat list rather
+ * than inventing a headline.
+ */
+function renderFlow(postings){
+  var list=postings||[];
+  var lead=-1;
+  for(var i=0;i<list.length;i++){ if(list[i].direction==='DEBIT'){lead=i;break;} }
+
+  // "into"/"from" is the ledger's existing plain-language vocabulary for a debit
+  // and a credit — the layout is what was wrong here, not the wording.
+  var cell=function(p,cls){
+    var into=p.direction==='DEBIT';
+    return '<div class="flow-row '+cls+'">'+
+      '<span class="flow-amt amount">'+moneyHtml(p.amount,p.asset)+'</span>'+
+      '<span class="flow-dir '+(into?'in':'out')+'">'+(into?'into':'from')+'</span>'+
+      accountCell(p.account)+'</div>';
+  };
+
+  var h='<div class="flow">';
+  if(lead>=0&&list.length>1){
+    h+=cell(list[lead],'lead');
+    var first=true;
+    for(var j=0;j<list.length;j++){
+      if(j===lead)continue;
+      h+=cell(list[j],'split'+(first?' split-start':''));
+      first=false;
+    }
+  }else{
+    for(var k=0;k<list.length;k++)h+=cell(list[k],k===0?'lead':'split'+(k===1?' split-start':''));
+  }
+  return h+'</div>';
+}
+
+/**
+ * The event column: what happened, then when and against which reference. These
+ * were three separate table columns, which left two of them almost empty and
+ * pushed the reference so far right it read as unrelated to its own row.
+ */
+function renderEventCell(label, cls, when, ref){
+  return '<div class="entry-what"><span class="badge '+cls+'">'+esc(label)+'</span>'+
+    '<div class="entry-meta">'+(when||'')+
+    (ref?'<span class="sep">·</span><span class="ref" title="'+esc(ref)+'">'+esc(short(ref))+'</span>':'')+
+    '</div></div>';
+}
+
+function renderTimeframeSwitcher(active){
+  active=active||'7 Days';
+  var list=['Today','7 Days','30 Days','All Time'];
+  var h='<div class="row"><div class="timeframe-group">';
+  for(var i=0;i<list.length;i++){
+    h+='<button class="tf-btn'+(list[i]===active?' active':'')+'" onclick="window.setTimeframe&&window.setTimeframe(\''+list[i]+'\')">'+list[i]+'</button>';
+  }
+  // Timestamps render as UTC throughout (see when()), so the chip states that
+  // rather than guessing at an offset.
+  h+='</div><div class="tz-badge">🌐 UTC</div></div>';
+  return h;
+}
+
+/**
+ * The sidebar foot carries only what the page can actually observe. It used to
+ * print an uptime, a CPU percentage and a MAINNET pill that were all string
+ * literals — a console for a custody engine is the last place to show a number
+ * nobody measured. Environment comes from the API (setEngineEnv) and is simply
+ * absent until it answers.
+ */
+var ENGINE_ENV=null;
+function setEngineEnv(env){ENGINE_ENV=env?String(env):null;}
+function renderSidebarFooter(){
+  var envPill=ENGINE_ENV
+    ? '<div class="env-pill'+(/test|dev/i.test(ENGINE_ENV)?' testnet':'')+'"><span class="status-dot"></span><span>'+esc(ENGINE_ENV)+'</span></div>'
+    : '';
+  var dark=currentTheme()==='dark';
+  // One row rather than three stacked blocks: status and environment belong
+  // together (both answer "what am I looking at?"), and the toggle is an action,
+  // so it sits apart on the right.
+  return '<div class="side-foot">'+
+    '<div class="side-foot-item"><span class="dot green"></span><span>connected</span></div>'+
+    envPill+
+    '<div class="spacer"></div>'+
+    '<button class="theme-toggle" onclick="toggleTheme()" title="Switch to '+(dark?'light':'dark')+' theme" aria-label="Switch to '+(dark?'light':'dark')+' theme">'+(dark?'☀️':'🌙')+'</button>'+
+    '</div>';
+}
+
+/**
+ * The overview's four headline cards. The vocabulary is the engine's — movements,
+ * deposits, payouts, held balances, assets, chains. It previously read "TOTAL
+ * ORDERS" and "payouts / donations", which are a merchant's words for a
+ * merchant's product; per ADR 0017 the engine does not have orders.
+ *
+ * A card renders only when its caller supplies a value, so a console that cannot
+ * answer "how many chains" shows three cards rather than a confident zero.
+ */
+function renderNexisCards(opts){
+  opts=opts||{};
+  var card=function(cls,icon,title,val,subs){
+    var h='<div class="nexis-card '+cls+'">'+
+      '<div class="nexis-card-head"><div class="icon-box">'+icon+'</div><span>'+esc(title)+'</span></div>'+
+      '<div class="nexis-card-val">'+esc(String(val))+'</div>';
+    for(var i=0;i<(subs||[]).length;i++){
+      var s=subs[i];
+      h+='<div class="nexis-sub-item"><div class="nexis-sub-title '+s.hue+'">'+esc(s.title)+'</div>'+
+         (s.desc?'<div class="nexis-sub-desc">'+esc(s.desc)+'</div>':'')+'</div>';
+    }
+    return h+'</div>';
+  };
+
+  var out='';
+  if(opts.movements!=null){
+    out+=card('cyan','📊','LEDGER MOVEMENTS',opts.movements,[
+      {hue:'cyan',title:(opts.depositCount||'0')+' deposits',desc:opts.depositSub||''},
+      {hue:'orange',title:(opts.payoutCount||'0')+' payouts',desc:opts.payoutSub||''}
+    ]);
+  }
+  if(opts.held!=null){
+    out+=card('green','💲','HELD FOR CUSTOMERS',opts.held,[
+      {hue:'cyan',title:(opts.inflow||'0')+' in',desc:''},
+      {hue:'orange',title:(opts.outflow||'0')+' out',desc:''}
+    ]);
+  }
+  if(opts.assets!=null){
+    out+=card('purple','👛','ASSETS',opts.assets,[{hue:'',title:'Supported by this deployment',desc:''}]);
+  }
+  if(opts.chains!=null){
+    out+=card('orange','📦','CHAINS',opts.chains,[{hue:'',title:'Routed by this deployment',desc:''}]);
+  }
+  return '<div class="nexis-cards">'+out+'</div>';
+}
+
+function buildDailyActivity(deposits, payouts){
+  var map={Mon:{pay:0,don:0,pend:0,part:0,exp:0},Tue:{pay:0,don:0,pend:0,part:0,exp:0},Wed:{pay:0,don:0,pend:0,part:0,exp:0},Thu:{pay:0,don:0,pend:0,part:0,exp:0},Fri:{pay:0,don:0,pend:0,part:0,exp:0},Sat:{pay:0,don:0,pend:0,part:0,exp:0},Sun:{pay:0,don:0,pend:0,part:0,exp:0}};
+  var dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  (deposits||[]).forEach(function(d){
+    var dt=new Date(d.occurredAt||d.occurred_at||d.createdAt||Date.now());
+    var nm=dayNames[dt.getDay()];
+    if(map[nm]){
+      var k=String(d.kind||d.status||'');
+      if(k.indexOf('finalized')!==-1||k==='settled')map[nm].pay++;
+      else if(k.indexOf('quarantined')!==-1||k==='failed')map[nm].exp++;
+      else map[nm].pend++;
+    }
+  });
+  (payouts||[]).forEach(function(p){
+    var dt=new Date(p.createdAt||p.occurred_at||Date.now());
+    var nm=dayNames[dt.getDay()];
+    if(map[nm]){
+      var s=String(p.status||p.kind||'');
+      if(s==='settled')map[nm].don++;
+      else if(s==='failed')map[nm].exp++;
+      else map[nm].pend++;
+    }
+  });
+  var order=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var res=[];
+  for(var i=0;i<order.length;i++){
+    var o=map[order[i]];
+    o.day=order[i];
+    res.push(o);
+  }
+  return res;
+}
+
+function renderDailyActivityChart(daysData){
+  var defaultDays=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var days=[];
+  if(daysData&&daysData.length){
+    days=daysData;
+  }else{
+    for(var k=0;k<7;k++){
+      days.push({day:defaultDays[k],pay:0,don:0,pend:0,part:0,exp:0});
+    }
+  }
+
+  // Find max stacked height to normalize heights up to 140px
+  var maxStack=1;
+  for(var m=0;m<days.length;m++){
+    var total=(days[m].pay||0)+(days[m].don||0)+(days[m].pend||0)+(days[m].part||0)+(days[m].exp||0);
+    if(total>maxStack)maxStack=total;
+  }
+
+  var bars='';
+  for(var i=0;i<days.length;i++){
+    var d=days[i];
+    var scale=130/maxStack;
+    var hPay=Math.round((d.pay||0)*scale);
+    var hDon=Math.round((d.don||0)*scale);
+    var hPend=Math.round((d.pend||0)*scale);
+    var hPart=Math.round((d.part||0)*scale);
+    var hExp=Math.round((d.exp||0)*scale);
+
+    bars+='<div class="bar-col">'+
+      '<div class="bar-stack">'+
+        (hExp>0?'<div class="bar-seg expired" style="height:'+hExp+'px" title="Held / failed: '+(d.exp||0)+'"></div>':'')+
+        (hPart>0?'<div class="bar-seg partial" style="height:'+hPart+'px" title="Partial: '+(d.part||0)+'"></div>':'')+
+        (hPend>0?'<div class="bar-seg pending" style="height:'+hPend+'px" title="Pending: '+(d.pend||0)+'"></div>':'')+
+        (hDon>0?'<div class="bar-seg donations" style="height:'+hDon+'px" title="Payouts: '+(d.don||0)+'"></div>':'')+
+        (hPay>0?'<div class="bar-seg payments" style="height:'+hPay+'px" title="Deposits: '+(d.pay||0)+'"></div>':'')+
+      '</div>'+
+      '<div class="bar-label">'+esc(d.day)+'</div>'+
+    '</div>';
+  }
+
+  return '<div class="chart-panel">'+
+    '<div class="chart-header">'+
+      '<h3>Daily activity (7 days)</h3>'+
+      // Legend swatches read their colour from the same tokens as the bars, so
+      // the two cannot drift and both follow the theme.
+      '<div class="chart-legend">'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--success))"></span><span>Deposits</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--warning))"></span><span>Payouts</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--primary))"></span><span>Pending</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--accent-lime))"></span><span>Partial</span></div>'+
+        '<div class="legend-item"><span class="legend-dot" style="background:rgb(var(--navy-300))"></span><span>Held / failed</span></div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="stacked-bars-container">'+bars+'</div>'+
+  '</div>';
+}
+
 
 function group(s){return String(s).replace(/\B(?=(\d{3})+(?!\d))/g,',');}
 
@@ -384,9 +896,9 @@ var ICONS={
   audit:'M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5',
   earnings:'M12 2v20m5-17H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6',
   errors:'M12 8v5m0 3.5h.01M10.3 4.3L2.8 17a2 2 0 001.7 3h15a2 2 0 001.7-3L14.7 4.3a2 2 0 00-3.4 0z',
-  accounting:'M9 7h6m-6 4h6m-6 4h4M3 3h18v18H3z',
   ai:'M12 2a10 10 0 100 20 10 10 0 000-20zm0 4a6 6 0 110 12 6 6 0 010-12z',
-  por_pos:'M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 10h6v-6h-6z'
+  // Pool addresses: a wallet holding coins, distinct from the ledger's book icon.
+  pools:'M3 8a2 2 0 012-2h14a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2zm0 3h18M16 14h2'
 };
 function navIcon(name){
   var d=ICONS[name];
@@ -468,7 +980,7 @@ function showToast(msg){
   var c=document.getElementById('toast-box');
   if(!c){c=document.createElement('div');c.id='toast-box';c.className='toast-container';document.body.appendChild(c);}
   var t=document.createElement('div');t.className='toast';
-  t.innerHTML='<span style="color:#2dd4bf;font-size:16px;">✓</span> <span>'+esc(msg)+'</span>';
+  t.innerHTML='<span style="color:rgb(var(--success));font-size:16px;">✓</span> <span>'+esc(msg)+'</span>';
   c.appendChild(t);
   setTimeout(function(){
     t.style.opacity='0';t.style.transform='translateY(10px)';t.style.transition='all 0.22s ease';

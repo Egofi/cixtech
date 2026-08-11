@@ -17,6 +17,7 @@ rise to cixtech and supersedes egofi's ADR 0001.
 - **0014** — MPC interim threshold signing
 - **0015** — super-admin console
 - **0016** — multi-chain engine
+- **0017** — engine scope boundary (no merchant/checkout/fiat layer here)
 
 The build spec (`../CUSTODY_ENGINE_BUILD_SPEC.md`) and the step-1 ledger plan
 (`../CIXTECH_STEP1_LEDGER_CORE.md`) sit alongside this directory.

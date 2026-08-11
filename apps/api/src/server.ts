@@ -1,5 +1,5 @@
 import { EoaFundTransferStrategy, GatherStrategyRegistry } from "@cixtech/attribution";
-import { ChainRegistry } from "@cixtech/chain-config";
+import { ChainRegistry, chainEnvOrNull } from "@cixtech/chain-config";
 import {
   BroadcasterGasFunder,
   GasStation,
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   const sql = db.sql;
   await assertSchemaReady(sql);
 
-  const { router, engineXpub, chains } = buildRouter(env, sql);
+  const { router, engineXpub, chains, skipped } = buildRouter(env, sql);
   if (chains.length === 0)
     throw new Error("No chains configured (set at least one <CHAIN>_RPC_URL)");
 
@@ -94,6 +94,21 @@ async function main(): Promise<void> {
         })
       : undefined,
   );
+  /**
+   * Where the platform's accrued fee is collected to, per chain.
+   *
+   * Per chain and not one global address, because a sweep is a real transfer on
+   * that chain — an EVM address cannot receive a TRC-20. Absent for a chain means
+   * no fee is collected there; the claim simply stays accrued, which is safe.
+   * Falls back to the gas treasury only when explicitly told to, since sharing
+   * one address for float and revenue is a decision, not a default.
+   */
+  const feeTreasuryAddressFor = (chain: string): string | undefined =>
+    env[`CIXTECH_FEE_TREASURY_ADDRESS_${chain.toUpperCase()}`] ??
+    (env["CIXTECH_FEE_TREASURY_USES_GAS_TREASURY"] === "true" ? treasuryAddress : undefined);
+
+  const feeSweepDust = env["CIXTECH_FEE_SWEEP_MIN_BASE_UNITS"];
+
   const gatherStrategies = new GatherStrategyRegistry([
     new EoaFundTransferStrategy(router.deriveAddress, gasStation, {
       gasRequirementBaseUnits: gasRules,
@@ -101,10 +116,39 @@ async function main(): Promise<void> {
     }),
   ]);
 
+  /**
+   * Say which chains are live, which are not, and why — at boot, in the log.
+   *
+   * "Which chains do we support?" was previously unanswerable without reading
+   * the environment of a running process, because a chain registers only when
+   * its RPC URL happens to be set. Silence is the worst possible answer to that
+   * question for a custody engine.
+   *
+   * Gas funding gets the same treatment for a related reason: without a
+   * treasury, a token payout builds and signs correctly and then fails at
+   * broadcast for want of native gas. That is recoverable, so it does not stop
+   * boot — but it must not be discovered from a failed payout either.
+   */
+  const gasFunding = treasuryAddress && treasuryIndex ? "enabled" : "DISABLED";
+  const notRegistered =
+    skipped.length > 0
+      ? ` | not registered: ${skipped.map((s) => `${s.chain} (${s.reason})`).join(", ")}`
+      : "";
+  const gasHint =
+    gasFunding === "DISABLED"
+      ? " — set CIXTECH_GAS_TREASURY_ADDRESS and _INDEX, or token payouts will fail at broadcast"
+      : "";
+  console.log(
+    `[chains] env=${chainEnvOrNull() ?? "unset"} live=${chains.join(",") || "none"}` +
+      `${notRegistered} | gas funding: ${gasFunding}${gasHint}`,
+  );
+
   const engine = buildEngine({
     sql,
     chains: router,
     gatherStrategies,
+    feeTreasuryAddressFor,
+    ...(feeSweepDust ? { feeSweepDustBaseUnits: BigInt(feeSweepDust) } : {}),
     // Durable guardrail state (survives restart, shared across nodes): kill-switch,
     // cool-down-aware allow-list, solvency gate, dual-approval, time-lock, velocity.
     policy: new PolicyEngine({
@@ -146,6 +190,7 @@ async function main(): Promise<void> {
     admin: {
       token: env["CIXTECH_ADMIN_TOKEN"],
       limits: { maxPerPayout: maxPayout, velocityWindowMs, velocityMax },
+      feeTreasuryAddressFor,
     },
   });
   const port = Number(env["PORT"] ?? "3000");

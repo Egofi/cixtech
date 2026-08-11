@@ -12,12 +12,10 @@ RUN apk add --no-cache bash curl && \
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc turbo.json tsconfig.base.json ./
 COPY apps/api/package.json ./apps/api/
 COPY apps/worker/package.json ./apps/worker/
-COPY packages/accounting/package.json ./packages/accounting/
 COPY packages/ai/package.json ./packages/ai/
 COPY packages/attribution/package.json ./packages/attribution/
 COPY packages/chain-config/package.json ./packages/chain-config/
 COPY packages/chains/package.json ./packages/chains/
-COPY packages/checkout/package.json ./packages/checkout/
 COPY packages/errors/package.json ./packages/errors/
 COPY packages/ledger/package.json ./packages/ledger/
 COPY packages/mpc/package.json ./packages/mpc/

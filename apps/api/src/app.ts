@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { assetRegistry } from "@cixtech/chain-config";
+import { assetRegistry, chainEnvOrNull } from "@cixtech/chain-config";
 import { UnsupportedChainError } from "@cixtech/chains";
 import { AppError, type ErrorSink, captureError } from "@cixtech/errors";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
@@ -11,13 +11,10 @@ import Fastify, {
   type FastifyRequest,
   type FastifyServerOptions,
 } from "fastify";
-import { registerAccounting } from "./accounting/accounting-routes.js";
-import { registerAi } from "./ai/ai-routes.js";
-import { registerPosAndPor } from "./pos/pos-routes.js";
 import { registerAdmin } from "./admin/admin-routes.js";
 import { AdminService } from "./admin/admin-service.js";
 import { SqlErrorSink } from "./admin/sql-error-sink.js";
-import { registerCheckout } from "./checkout/checkout-routes.js";
+import { registerAi } from "./ai/ai-routes.js";
 import type { Engine } from "./engine.js";
 import { installMetrics } from "./metrics.js";
 import { registerPortal } from "./portal/portal-routes.js";
@@ -84,15 +81,14 @@ const isPublic = (url: string): boolean =>
   url === "/metrics" ||
   url.startsWith("/docs") ||
   url.startsWith("/admin") ||
-  url.startsWith("/portal") ||
-  url.startsWith("/checkout") ||
-  url.startsWith("/v1/checkout/intents/") ||
-  url.startsWith("/v1/checkout/recovery");
+  url.startsWith("/portal");
 
 export interface AdminPlaneOptions {
   /** Super-admin bearer token. When unset, the admin plane is disabled. */
   token?: string | undefined;
   limits?: { maxPerPayout: string; velocityWindowMs: number; velocityMax: string };
+  /** Where collected fees go, per chain. Absent = the console refuses to sweep. */
+  feeTreasuryAddressFor?: ((chain: string) => string | undefined) | undefined;
 }
 
 export interface AppOptions {
@@ -117,6 +113,40 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     // stripping them — a wrong field name should fail loudly, not vanish.
     ajv: { customOptions: { removeAdditional: false } },
   });
+  /**
+   * An empty body with a JSON content-type parses to "no body" rather than being
+   * rejected.
+   *
+   * Several mutations here take no body at all — releasing the kill-switch,
+   * issuing a key, replaying a delivery — and the ones that do take a body treat
+   * it as optional (`req.body ?? {}`). Fastify's default parser refuses the
+   * combination outright, so any client that sets a JSON content-type once and
+   * reuses it for every call (both of our consoles did) could engage the
+   * kill-switch but never release it. A safety control that only latches one way
+   * is worse than no control, and that is a contract the engine owes every
+   * tenant's HTTP client, not just our own pages.
+   *
+   * Malformed JSON is still a hard 400 — this widens what counts as an empty
+   * body, not what counts as valid JSON.
+   */
+  app.addContentTypeParser<string>(
+    "application/json",
+    { parseAs: "string" },
+    (_req, body, done) => {
+      if (body === undefined || body === null || String(body).trim() === "") {
+        done(null, undefined);
+        return;
+      }
+      try {
+        done(null, JSON.parse(String(body)));
+      } catch {
+        const err = new Error("Body is not valid JSON") as Error & { statusCode: number };
+        err.statusCode = 400;
+        done(err, undefined);
+      }
+    },
+  );
+
   // Default to the durable SQL sink so the ADR 0012 trail is queryable in the admin console.
   const errorSink = opts.errorSink ?? new SqlErrorSink(engine.sql);
   const authed = new WeakMap<FastifyRequest, Tenant>();
@@ -176,24 +206,9 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
           description: "Money-out: allow-list management and policy-guarded withdrawals",
         },
         {
-          name: "checkout",
-          description: "Smart checkout, 15-minute price locks, payment intents & stranded deposit recovery",
-        },
-        {
-          name: "accounting",
-          description: "GAAP/IFRS trial balance GL exports (QuickBooks, Xero, MT940), ERP sync & customer refunds",
-        },
-        {
           name: "ai",
-          description: "Natural language financial sub-ledger query engine, risk anomaly feed & autonomous agentic rules",
-        },
-        {
-          name: "pos",
-          description: "Point-of-Sale terminal dynamic QR generator & thermal receipt printing",
-        },
-        {
-          name: "proof-of-reserves",
-          description: "Real-time cryptographic proof of 1:1 solvency backing & Merkle root verification",
+          description:
+            "Natural language financial sub-ledger query engine, risk anomaly feed & autonomous agentic rules",
         },
         {
           name: "webhooks",
@@ -252,6 +267,19 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
       await reply.status(STATUS[err.code] ?? 400).send({ error: err.toPublic() });
       return;
     }
+    // Fastify raises its own client errors — empty or malformed JSON body,
+    // unsupported media type, payload too large — and they arrive here carrying
+    // an accurate 4xx `statusCode`. Collapsing those into 500 tells the caller
+    // the engine broke when the caller's request did, hides the one message that
+    // says how to fix it, and fills the error log (and anything alerting on it)
+    // with false internal faults. Only a genuine 5xx becomes an opaque INTERNAL.
+    const status = typeof err.statusCode === "number" ? err.statusCode : 500;
+    if (status >= 400 && status < 500) {
+      await reply
+        .status(status)
+        .send({ error: { id: record.id, code: err.code ?? "BAD_REQUEST", message: err.message } });
+      return;
+    }
     await reply
       .status(500)
       .send({ error: { id: record.id, code: "INTERNAL", message: "Internal error" } });
@@ -293,7 +321,11 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     tenantOf(req);
     // `assets` carries decimals because the ledger speaks integer base units:
     // without it a client cannot tell 4.34 USDT from 4,340,000 of them.
-    return { chains: engine.chains.chains(), assets };
+    // `env` is which network this deployment is pointed at (§16.5) — a console
+    // that shows balances must not leave the operator guessing. Absent rather
+    // than fatal when unset: a label must never take down a data route.
+    const env = chainEnvOrNull();
+    return { chains: engine.chains.chains(), assets, ...(env ? { env } : {}) };
   });
 
   // ── Tenant-scoped activity reads (feeds the portal + interactive docs) ────────
@@ -528,24 +560,20 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   // Admin console + control plane (ADR 0015): separate bearer auth, all-tenant
   // reads, safe audited controls. Registered even when disabled so /admin returns
   // a clear "disabled" 401 rather than a 404.
-  const adminService = new AdminService(engine.sql, engine, opts.admin?.limits ?? DEFAULT_LIMITS);
+  const adminService = new AdminService(
+    engine.sql,
+    engine,
+    opts.admin?.limits ?? DEFAULT_LIMITS,
+    opts.admin?.feeTreasuryAddressFor,
+  );
   registerAdmin(app, { service: adminService, token: opts.admin?.token });
 
   // Tenant portal (dashboard) — static SPA shell; its data calls hit /v1 with the
   // tenant API key, so the shell itself needs no server-side auth.
   registerPortal(app);
 
-  // Phase 2 Checkout & FX Payment Intent routes
-  registerCheckout(app, { engine });
-
-  // Phase 3 Accounting, ERP Sync & Automated Refund routes
-  registerAccounting(app, { engine });
-
-  // Phase 4 Autonomous AI Agent Financial Ops & Anomaly Detection routes
+  // Autonomous AI Agent Financial Ops & Anomaly Detection routes
   registerAi(app, { engine });
-
-  // Proof of Reserves & POS Terminal routes
-  registerPosAndPor(app, { engine });
 
   await app.ready();
   return app;

@@ -4,6 +4,16 @@ coverage/
 .turbo/
 *.tsbuildinfo
 
+# Emitted output belongs in dist/, never beside its source. A stray `tsc` run
+# without -p once committed .js/.d.ts/.map files into apps/api/src, where they
+# shadow the TypeScript they were built from.
+apps/*/src/**/*.js
+apps/*/src/**/*.js.map
+apps/*/src/**/*.d.ts
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+packages/*/src/**/*.d.ts
+
 # Secrets / env — never commit
 .env
 .env.*

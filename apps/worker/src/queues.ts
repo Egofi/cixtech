@@ -1,18 +1,18 @@
-import { Queue, type ConnectionOptions } from "bullmq";
+import { type ConnectionOptions, Queue } from "bullmq";
 import IORedis from "ioredis";
 
 // ── Queue names ──────────────────────────────────────────────────────────────
 
 export const QUEUE_WEBHOOK_DISPATCH = "webhook-dispatch";
 export const QUEUE_EXTERNAL_RECONCILE = "external-reconcile";
-export const QUEUE_FEE_SWEEP = "fee-sweep";
 export const QUEUE_POOL_RELEASE = "pool-release";
+export const QUEUE_POOL_BALANCE = "pool-balance";
 
 export const ALL_QUEUES = [
   QUEUE_WEBHOOK_DISPATCH,
   QUEUE_EXTERNAL_RECONCILE,
-  QUEUE_FEE_SWEEP,
   QUEUE_POOL_RELEASE,
+  QUEUE_POOL_BALANCE,
 ] as const;
 
 // ── Redis connection ─────────────────────────────────────────────────────────
@@ -48,8 +48,8 @@ export function createQueues(redis: IORedis) {
   return {
     webhookDispatch: new Queue(QUEUE_WEBHOOK_DISPATCH, opts),
     externalReconcile: new Queue(QUEUE_EXTERNAL_RECONCILE, opts),
-    feeSweep: new Queue(QUEUE_FEE_SWEEP, opts),
     poolRelease: new Queue(QUEUE_POOL_RELEASE, opts),
+    poolBalance: new Queue(QUEUE_POOL_BALANCE, opts),
   };
 }
 

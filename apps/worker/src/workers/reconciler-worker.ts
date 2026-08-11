@@ -1,6 +1,6 @@
+import type { ExternalDriftRow, ExternalReconciler } from "@cixtech/chains";
 import { Worker } from "bullmq";
 import type IORedis from "ioredis";
-import type { ExternalReconciler, ExternalDriftRow } from "@cixtech/chains";
 import { QUEUE_EXTERNAL_RECONCILE, connectionOpts } from "../queues.js";
 
 /**

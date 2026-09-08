@@ -1,0 +1,65 @@
+{
+  "name": "@cixtech/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "cixtech custody engine \u2014 HTTP API and background worker, one codebase, two deployables",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.api.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check --write .",
+    "lint:ci": "biome check .",
+    "dev": "node dev-run.mjs api",
+    "dev:worker": "node dev-run.mjs worker",
+    "db:migrate": "node dev-run.mjs migrate",
+    "guard:constants": "node tooling/no-magic-constants/check.mjs src",
+    "verify:chains": "node scripts/verify-chain-config.mjs",
+    "generate-test-key": "node scripts/generate-test-key.mjs",
+    "rotate-admin-token": "node scripts/rotate-admin-token.mjs",
+    "check": "pnpm typecheck && pnpm lint:ci && pnpm guard:constants && pnpm test",
+    "create-operator": "node scripts/create-operator.mjs"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/swagger": "^9",
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "@scalar/fastify-api-reference": "^1.62.9",
+    "@scure/base": "^2.2.0",
+    "@scure/bip32": "^2.2.0",
+    "bullmq": "^5.34.0",
+    "fastify": "^5.12.3",
+    "ioredis": "^5.6.1",
+    "pg": "^8.22.0",
+    "prom-client": "^15",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.20.0",
+    "embedded-postgres": "17.10.0-beta.17",
+    "esbuild": "^0.25.0",
+    "fast-check": "^3.23.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.6"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-uri": "^4.1.4",
+      "find-my-way": "^9.7.0",
+      "nanoid": "^3.3.18",
+      "esbuild": "^0.25.0",
+      "postcss": "^8.5.23",
+      "vite": "^6.4.3"
+    }
+  }
+}

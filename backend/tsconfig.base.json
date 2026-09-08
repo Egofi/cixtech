@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+
+    // Module aliases replace the old @cixtech/* workspace packages. Same module
+    // boundaries, no workspace ceremony: `@/ledger` is a directory, not a package
+    // that must be versioned, linked and built before anything can import it.
+    // tsconfig, vitest.config.ts and bundle.mjs all declare these; they must agree.
+    "baseUrl": ".",
+    "paths": {
+      "@/types": ["./types/index.ts"],
+      "@/types/*": ["./types/*"],
+      "@/*": ["./src/*"],
+      "@test/*": ["./test/*"]
+    }
+  }
+}

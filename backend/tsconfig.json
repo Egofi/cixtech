@@ -1,0 +1,11 @@
+{
+  // The engine core, checked at full strength.
+  //
+  // `src/api` is checked separately by tsconfig.api.json, which relaxes exactly
+  // one flag — see the note there. Splitting the two is what lets the ledger,
+  // chains and attribution modules keep `exactOptionalPropertyTypes` while the
+  // HTTP adapter, which cannot compile under it, still gets typechecked.
+  "extends": "./tsconfig.base.json",
+  "include": ["src/**/*.ts", "types/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/api/**"]
+}

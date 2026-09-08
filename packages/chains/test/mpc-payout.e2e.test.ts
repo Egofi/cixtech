@@ -4,19 +4,33 @@ import { describe, expect, it } from "vitest";
 import type { HttpClient } from "../src/http.js";
 import { TronPayoutBroadcaster } from "../src/payout/tron-broadcaster.js";
 import { tronAddressFromPubkey } from "../src/tron/address.js";
+import { tronAddressToHex } from "../src/tron/tron-encoding.js";
+import { builtTx, trc20Calldata, trc20RawData, txIdFor } from "./tron-fixtures.js";
 
 const DEST = "TTetbYe8bRMfz6ASefJACCb2gSzwbe9AqW";
 const NILE_USDT = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
-const TXID = "11".repeat(32); // 32-byte txID the node "returns"
+const AMOUNT = 1_000_000n;
 
+/**
+ * An honest node: it builds the transfer it was asked for, and its txID is the
+ * hash of the body it returns. The broadcaster verifies both before signing, so a
+ * fake that answered with a bare txID would now (correctly) be refused.
+ */
 class FakeHttp implements HttpClient {
   broadcastBody: Record<string, unknown> | undefined;
+  rawDataHex = "";
+  constructor(private readonly from: () => string) {}
   async getJson<T>(): Promise<T> {
     throw new Error("unused");
   }
   async postJson<T>(url: string, body: unknown): Promise<T> {
     if (url.endsWith("/triggersmartcontract")) {
-      return { result: { result: true }, transaction: { txID: TXID } } as T;
+      this.rawDataHex = trc20RawData(
+        tronAddressToHex(this.from()),
+        tronAddressToHex(NILE_USDT),
+        trc20Calldata(tronAddressToHex(DEST), AMOUNT),
+      );
+      return { result: { result: true }, transaction: builtTx(this.rawDataHex) } as T;
     }
     this.broadcastBody = body as Record<string, unknown>;
     return { result: true } as T;
@@ -32,7 +46,7 @@ describe("MPC ThresholdSigner drives a Tron payout (drop-in Signer)", () => {
     const from = signer.deriveAddress(0);
     expect(from.startsWith("T")).toBe(true);
 
-    const http = new FakeHttp();
+    const http = new FakeHttp(() => from);
     const broadcaster = new TronPayoutBroadcaster(http, signer, {
       baseUrl: "https://nile.trongrid.io",
       tokenContracts: { USDT: NILE_USDT },
@@ -41,12 +55,12 @@ describe("MPC ThresholdSigner drives a Tron payout (drop-in Signer)", () => {
     const res = await broadcaster.send({
       chain: "TRON",
       asset: "USDT",
-      amountBaseUnits: 1_000_000n,
+      amountBaseUnits: AMOUNT,
       fromAddress: from,
       fromDerivationIndex: 0,
       toAddress: DEST,
     });
-    expect(res.txId).toBe(TXID);
+    expect(res.txId).toBe(txIdFor(http.rawDataHex));
 
     // The signature attached to the broadcast was produced by the threshold nodes
     // and recovers to the threshold public key's Tron address.
@@ -54,7 +68,7 @@ describe("MPC ThresholdSigner drives a Tron payout (drop-in Signer)", () => {
     const sig = Uint8Array.from(Buffer.from(sigHex as string, "hex"));
     const recovered = secp256k1.Signature.fromCompact(sig.subarray(0, 64))
       .addRecoveryBit(sig[64] as number)
-      .recoverPublicKey(Uint8Array.from(Buffer.from(TXID, "hex")))
+      .recoverPublicKey(Uint8Array.from(Buffer.from(txIdFor(http.rawDataHex), "hex")))
       .toRawBytes(true);
     expect(tronAddressFromPubkey(recovered)).toBe(from);
   });

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { SqlClient } from "@cixtech/ledger";
 
 export type AnomalyType = "VELOCITY_SPIKE" | "ZERO_DAY_ADDRESS_DRAIN";
@@ -31,18 +32,22 @@ export class AnomalyDetector {
     const now = new Date();
 
     // 1. Check zero-day address high-volume drain pattern
+    // Filtered on added_at, not usable_at. `usable_at` is set FORWARD by the
+    // cool-down, so `usable_at > now() - 24h` actually matched everything added in
+    // the last 48 hours — and would have matched every row ever added had the
+    // cool-down been raised. The column that means "added" is added_at.
     const { rows: allowlistRows } = await this.sql.query<{
       address: string;
-      usable_at: string;
+      added_at: string;
     }>(
-      `SELECT address, usable_at FROM payout_allowlist 
-       WHERE tenant = $1 AND usable_at > now() - interval '24 hours'`,
+      `SELECT address, added_at FROM payout_allowlist
+        WHERE tenant = $1 AND added_at > now() - interval '24 hours'`,
       [tenantId],
     );
 
     if (allowlistRows.length > 5) {
       alerts.push({
-        id: `anm_${Math.random().toString(36).substring(2, 11)}`,
+        id: `anm_${randomUUID()}`,
         tenantId,
         type: "ZERO_DAY_ADDRESS_DRAIN",
         severity: "HIGH",

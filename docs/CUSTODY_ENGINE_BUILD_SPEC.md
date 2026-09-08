@@ -3,7 +3,15 @@
 **Owner:** Nuelgreen AI
 **Product:** **cixtech** — the custody engine.
 **Nature:** Multi-tenant, licensed crypto-custody infrastructure (Wallet-as-a-Service)
-**Core promise:** *A business calls one API to give its users deposit addresses, hold balances, and pay out — while a licensed custodian holds the keys under threshold MPC, and every satoshi is provably backed.*
+**Core promise:** *A business calls one API to give its users deposit addresses, hold balances, and pay out — while a licensed custodian holds the keys, and every satoshi is provably backed.*
+
+> **Key custody, as actually deployed today.** The launch path signs with a single
+> HD key loaded from `CIXTECH_ENGINE_XPRV` into the API process (ADR 0007's
+> documented interim). Threshold MPC is implemented in `packages/mpc` but is **not**
+> wired into the production signing path. On mainnet the engine refuses to start
+> unless `CIXTECH_ACKNOWLEDGE_HOT_KEY=true` records that this is deliberate. Do not
+> describe the deployed system as MPC-backed until the signer is swapped — see
+> `docs/SECURITY_AUDIT.md` (CX-16).
 
 egofi is the **first tenant**, not the owner. The engine knows nothing about
 invoices, checkouts or merchants — it knows **tenants, accounts, deposits,

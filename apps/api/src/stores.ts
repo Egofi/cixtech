@@ -6,6 +6,30 @@ import type { SqlClient } from "@cixtech/ledger";
 export const SCOPES = ["read", "move-funds", "approve"] as const;
 export type Scope = (typeof SCOPES)[number];
 
+/**
+ * Validate a caller-supplied scope list, rejecting anything unrecognised.
+ *
+ * Every key used to be minted with the full `SCOPES` tuple because that was the
+ * default and no route ever passed anything else — which made the documented
+ * "`approve` does not imply `move-funds`" boundary impossible to actually
+ * configure, and reduced dual control to two equally-privileged keys in the same
+ * vault. Scopes are only a boundary if a key can be issued without all of them.
+ */
+export function parseScopes(input: unknown): readonly Scope[] {
+  if (input === undefined || input === null) return SCOPES;
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new InvalidScopesError("scopes must be a non-empty array", { exposable: true });
+  }
+  const bad = input.filter((s) => !SCOPES.includes(s as Scope));
+  if (bad.length > 0) {
+    throw new InvalidScopesError(
+      `Unknown scope(s): ${bad.join(", ")}. Valid scopes are ${SCOPES.join(", ")}.`,
+      { context: { valid: SCOPES.join(",") }, exposable: true },
+    );
+  }
+  return [...new Set(input as Scope[])];
+}
+
 /** Everything a tenant key is allowed to do, plus the identity it acts as. */
 export interface Tenant {
   id: string;
@@ -17,6 +41,10 @@ export interface Tenant {
 
 export class ForbiddenScopeError extends AppError {
   readonly code = "FORBIDDEN_SCOPE";
+}
+/** A key was requested with a scope list the engine does not recognise. */
+export class InvalidScopesError extends AppError {
+  readonly code = "INVALID_SCOPES";
 }
 export interface Account {
   id: string;

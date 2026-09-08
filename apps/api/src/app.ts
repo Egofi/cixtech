@@ -1,8 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { assetRegistry, chainEnvOrNull } from "@cixtech/chain-config";
 import { UnsupportedChainError } from "@cixtech/chains";
 import { AppError, type ErrorSink, captureError } from "@cixtech/errors";
 import { Asset, LedgerAccountKey } from "@cixtech/types";
+import fastifyHelmet from "@fastify/helmet";
+import fastifyRateLimit from "@fastify/rate-limit";
 import fastifySwagger from "@fastify/swagger";
 import scalarApiReference from "@scalar/fastify-api-reference";
 import Fastify, {
@@ -15,6 +17,7 @@ import { registerAdmin } from "./admin/admin-routes.js";
 import { AdminService } from "./admin/admin-service.js";
 import { SqlErrorSink } from "./admin/sql-error-sink.js";
 import { registerAi } from "./ai/ai-routes.js";
+import { assertValidDestination } from "./destination.js";
 import type { Engine } from "./engine.js";
 import { installMetrics } from "./metrics.js";
 import { registerPortal } from "./portal/portal-routes.js";
@@ -34,10 +37,13 @@ import {
   listDepositsSchema,
   listPayoutsSchema,
   listWebhookDeliveriesSchema,
+  removeAllowlistSchema,
   setWebhookSchema,
   withdrawalSchema,
 } from "./schemas.js";
 import { ForbiddenScopeError, type Scope, type Tenant, UnauthorizedError } from "./stores.js";
+import { runAsTenant } from "./tenant-scope.js";
+import { assertPublicWebhookUrl } from "./webhook-url.js";
 
 const STATUS: Record<string, number> = {
   UNAUTHORIZED: 401,
@@ -51,6 +57,9 @@ const STATUS: Record<string, number> = {
   FORBIDDEN_SCOPE: 403,
   POLICY_SELF_APPROVAL: 403,
   VALIDATION: 400,
+  INVALID_SCOPES: 400,
+  UNSAFE_WEBHOOK_URL: 400,
+  INVALID_DESTINATION: 400,
   UNSUPPORTED_CHAIN: 400,
   LEDGER_INSUFFICIENT_FUNDS: 409,
   LEDGER_UNKNOWN_ENTRY: 409,
@@ -91,11 +100,43 @@ export interface AdminPlaneOptions {
   feeTreasuryAddressFor?: ((chain: string) => string | undefined) | undefined;
 }
 
+export interface RateLimitOptions {
+  /** Requests per window for an authenticated tenant. */
+  max?: number;
+  /** Window length in milliseconds. */
+  windowMs?: number;
+  /** Much tighter bucket for requests that FAIL authentication, keyed on IP. */
+  authFailureMax?: number;
+  /** Disable entirely. Only for tests that deliberately hammer a route. */
+  enabled?: boolean;
+}
+
 export interface AppOptions {
   errorSink?: ErrorSink;
   logger?: FastifyServerOptions["logger"];
   admin?: AdminPlaneOptions;
+  rateLimit?: RateLimitOptions;
+  /**
+   * Require the admin bearer token for `/metrics`. Default true.
+   *
+   * The scrape endpoint publishes the Node version, process start time, heap and
+   * event-loop detail, and per-route request counts with statuses — enough to
+   * profile tenant activity and time an incident from outside. Set false only when
+   * the port is bound to an internal interface a scraper reaches directly.
+   */
+  publicMetrics?: boolean;
+  /**
+   * Permit `http://` and private webhook targets. Development only — it re-opens
+   * the SSRF in CX-09, so it is a deliberate boot-time choice.
+   */
+  allowInsecureWebhooks?: boolean;
 }
+
+const DEFAULT_RATE_LIMIT = {
+  max: 300,
+  windowMs: 60_000,
+  authFailureMax: 20,
+} as const;
 
 const DEFAULT_LIMITS = { maxPerPayout: "0", velocityWindowMs: 0, velocityMax: "0" };
 
@@ -150,6 +191,80 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   // Default to the durable SQL sink so the ADR 0012 trail is queryable in the admin console.
   const errorSink = opts.errorSink ?? new SqlErrorSink(engine.sql);
   const authed = new WeakMap<FastifyRequest, Tenant>();
+
+  /**
+   * Security response headers.
+   *
+   * Both consoles are served from this origin and hold a bearer credential in
+   * localStorage — the super-admin token in one, a tenant API key in the other —
+   * so script execution here reads both. The CSP is tight because the consoles
+   * ship as inline strings we control: no external script, style or connect
+   * origin is needed at all. `frame-ancestors 'none'` is the one that stops the
+   * kill switch and the fee sweep from being clickjacked.
+   *
+   * `'unsafe-inline'` is present for script and style because the consoles ARE
+   * inline; a nonce is the better answer and is a follow-up, not a reason to ship
+   * no CSP at all. Scalar's docs UI also renders inline.
+   */
+  await app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:"],
+        fontSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    // HSTS is meaningful only over TLS, and the engine sits behind a terminating
+    // proxy; a year with subdomains is the standard posture for a custody API.
+    strictTransportSecurity: { maxAge: 31_536_000, includeSubDomains: true },
+    crossOriginEmbedderPolicy: false, // would break the bundled Scalar docs assets
+    referrerPolicy: { policy: "no-referrer" },
+  });
+
+  /**
+   * Rate limiting (there was none).
+   *
+   * Two buckets, because they defend different things. The generous per-credential
+   * bucket bounds a single tenant's traffic. The much tighter per-IP bucket applies
+   * to requests that fail authentication, which is what caps credential guessing,
+   * webhook-URL probing, and the unauthenticated audit-log writes below.
+   *
+   * Keyed on the API key's HASH, never the key: the limiter's internal store and
+   * any error it logs must not become a place secrets accumulate.
+   */
+  const rl = { ...DEFAULT_RATE_LIMIT, ...opts.rateLimit };
+  if (opts.rateLimit?.enabled !== false) {
+    await app.register(fastifyRateLimit, {
+      global: true,
+      max: (req) => (authed.has(req) ? rl.max : rl.authFailureMax),
+      timeWindow: rl.windowMs,
+      keyGenerator: (req) => {
+        const key = header(req, "x-api-key");
+        if (key) return `k:${createHash("sha256").update(key).digest("hex")}`;
+        const admin = req.headers.authorization;
+        if (typeof admin === "string") {
+          return `a:${createHash("sha256").update(admin).digest("hex")}`;
+        }
+        return `ip:${req.ip}`;
+      },
+      // /health and /ready are what a load balancer polls; rate-limiting them
+      // turns a traffic spike into a spurious instance eviction.
+      allowList: (req) => req.url === "/health" || req.url === "/ready",
+      errorResponseBuilder: (_req, ctx) => ({
+        error: {
+          code: "RATE_LIMITED",
+          message: `Too many requests. Retry in ${Math.ceil(ctx.ttl / 1000)}s.`,
+        },
+      }),
+    });
+  }
 
   await app.register(fastifySwagger, {
     openapi: {
@@ -230,7 +345,9 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   // Scalar reference UI (assets bundled in the plugin — no CDN): sidebar nav,
   // auth panel for the API key, and a per-route "Test Request" client.
   await app.register(scalarApiReference, { routePrefix: "/docs" });
-  installMetrics(app);
+  // Scraping requires the admin token unless the deployment explicitly opts out
+  // (e.g. the port is bound to an internal interface).
+  installMetrics(app, opts.publicMetrics ? {} : { token: opts.admin?.token });
 
   /**
    * The authenticated tenant, asserting the key carries `scope` (build spec §16).
@@ -255,8 +372,58 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     authed.set(req, await engine.tenants.authenticate(header(req, "x-api-key")));
   });
 
+  /**
+   * Enter the authenticated tenant's RLS scope for the rest of the request (§13).
+   *
+   * Callback style, not async: `AsyncLocalStorage.run(store, done)` carries the
+   * context into the remaining hooks AND the route handler, because Fastify
+   * continues the chain synchronously from `done()`. An `async` hook would exit
+   * the context before the handler ever ran, which is the trap that leaves an
+   * ALS-based scope silently doing nothing.
+   *
+   * With this bound, `tenantScopedSql` sets `cixtech.tenant` on every statement
+   * the handler issues, so the row-level-security policies installed by rls.ts
+   * finally constrain a tenant request instead of matching everything.
+   */
+  app.addHook("onRequest", (req, _reply, done) => {
+    const tenant = authed.get(req);
+    if (!tenant) {
+      done();
+      return;
+    }
+    runAsTenant(tenant.id, done);
+  });
+
+  /**
+   * Errors that are the CALLER's fault and carry no diagnostic value are counted,
+   * not persisted.
+   *
+   * `captureError` used to run for every error including authentication failures,
+   * so one anonymous request equalled one row in `error_log` — an append-only
+   * table the application role is deliberately denied DELETE on, meaning nothing
+   * in the running system could trim it. With no rate limit that was an unbounded
+   * write primitive for an unauthenticated caller, and it buried real incidents
+   * under noise. These still surface in the Prometheus counters and the request
+   * log; what they no longer do is accumulate forever in the audit trail.
+   */
+  const NOT_WORTH_PERSISTING = new Set([
+    "UNAUTHORIZED",
+    "FORBIDDEN_SCOPE",
+    "VALIDATION",
+    "RATE_LIMITED",
+    "INVALID_SCOPES",
+  ]);
+
+  const capture = async (err: FastifyError): Promise<{ id: string }> => {
+    const code = err instanceof AppError ? err.code : err.validation ? "VALIDATION" : err.code;
+    if (code && NOT_WORTH_PERSISTING.has(code)) {
+      return { id: err instanceof AppError ? err.id : randomUUID() };
+    }
+    return captureError(errorSink, err);
+  };
+
   app.setErrorHandler(async (err: FastifyError, _req, reply) => {
-    const record = await captureError(errorSink, err);
+    const record = await capture(err);
     if (err.validation) {
       await reply
         .status(400)
@@ -300,6 +467,10 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   app.put("/v1/webhook", { schema: setWebhookSchema }, async (req, reply) => {
     const tenant = tenantOf(req, "move-funds");
     const { url } = req.body as { url: string };
+    // Refuse loopback, link-local (cloud metadata), and private targets here so
+    // the tenant gets an actionable 400 instead of a delivery that quietly probes
+    // our own network. The poster re-checks at send time against DNS rebinding.
+    await assertPublicWebhookUrl(url, { allowInsecure: opts.allowInsecureWebhooks === true });
     const secret = `${WEBHOOK_SECRET_PREFIX}${randomUUID().replace(/-/g, "")}`;
     await engine.webhookEndpoints.set(tenant.id, url, secret);
     await reply.status(201).send({ url, secret });
@@ -439,19 +610,53 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     const { id } = req.params as { id: string };
     await engine.tenants.requireAccount(tenant.id, id);
     const { chain, address } = req.body as { chain: string; address: string };
+    const allowChain = chain.toUpperCase();
+    if (!engine.chains.has(allowChain)) {
+      throw new UnsupportedChainError(`Chain not supported: ${allowChain}`, {
+        context: { chain: allowChain, supported: engine.chains.chains().join(",") },
+      });
+    }
+    // Validate the address for THIS chain now, rather than letting a malformed or
+    // wrong-chain destination sit on the allow-list until a payout fails on it
+    // after taking a lease and locking funds.
+    assertValidDestination(allowChain, address, engine.chains.familyOf(allowChain));
     // Cool-down applies (§7.2): the destination is unusable until usableAt, so a
     // compromised console cannot add an address and drain to it in one session.
     const { usableAt } = await engine.allowlist.add(
       tenant.id,
       id,
-      chain.toUpperCase(),
+      allowChain,
       address,
       engine.allowlistCooldownMs,
     );
-    await reply
-      .status(201)
-      .send({ chain: chain.toUpperCase(), address, usableAt: usableAt.toISOString() });
+    await reply.status(201).send({ chain: allowChain, address, usableAt: usableAt.toISOString() });
   });
+
+  /**
+   * Remove a destination from the allow-list (§7.2).
+   *
+   * There was no way to withdraw an address once added: after its cool-down it was
+   * usable forever. A tenant who discovers a destination is compromised needs this,
+   * and needs it to take effect at once.
+   */
+  app.delete(
+    "/v1/accounts/:id/allowlist",
+    { schema: removeAllowlistSchema },
+    async (req, reply) => {
+      const tenant = tenantOf(req, "move-funds");
+      const { id } = req.params as { id: string };
+      await engine.tenants.requireAccount(tenant.id, id);
+      const { chain, address } = req.query as { chain: string; address: string };
+      const removed = await engine.allowlist.remove(tenant.id, id, chain.toUpperCase(), address);
+      if (!removed) {
+        await reply
+          .status(404)
+          .send({ error: { code: "NOT_FOUND", message: "Destination is not allow-listed" } });
+        return;
+      }
+      await reply.send({ chain: chain.toUpperCase(), address, removed: true });
+    },
+  );
 
   app.post("/v1/accounts/:id/withdrawals", { schema: withdrawalSchema }, async (req, reply) => {
     const tenant = tenantOf(req, "move-funds");
@@ -463,6 +668,13 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
         context: { chain: withdrawChain, supported: engine.chains.chains().join(",") },
       });
     }
+    // Reject a malformed or wrong-chain destination before the intent is recorded,
+    // a gather lease is taken, or funds are locked.
+    assertValidDestination(
+      withdrawChain,
+      (req.body as { destination: string }).destination,
+      engine.chains.familyOf(withdrawChain),
+    );
     const key = header(req, "idempotency-key") as string; // required by schema
 
     const replay = await engine.idempotency.begin(tenant.id, key);
@@ -572,8 +784,10 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
   // tenant API key, so the shell itself needs no server-side auth.
   registerPortal(app);
 
-  // Autonomous AI Agent Financial Ops & Anomaly Detection routes
-  registerAi(app, { engine });
+  // Autonomous AI Agent Financial Ops & Anomaly Detection routes. Handed the same
+  // `tenantOf` every other /v1 route uses, so authentication AND scope enforcement
+  // are shared rather than reimplemented — the reimplementation checked no scope.
+  registerAi(app, { engine, tenantOf });
 
   await app.ready();
   return app;

@@ -113,8 +113,12 @@ const externalizeRest = {
 
 /** Bundle `src/<entry>.ts` to `.<entry>.bundle.mjs` and return the output path. */
 export async function bundle(entry) {
+  return bundleTo(entry, resolve(here, `.${entry}.bundle.mjs`));
+}
+
+/** Bundle `src/<entry>.ts` to an explicit path — used by the ahead-of-time image build. */
+export async function bundleTo(entry, outfile) {
   const { build } = loadEsbuild();
-  const outfile = resolve(here, `.${entry}.bundle.mjs`);
   await build({
     entryPoints: [resolve(here, `src/${entry}.ts`)],
     outfile,

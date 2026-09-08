@@ -3,7 +3,9 @@ import { AppError } from "@cixtech/errors";
 import { feeSwept } from "@cixtech/ledger";
 import type { LedgerService, SqlClient } from "@cixtech/ledger";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@cixtech/types";
+import type { AuthorizationSigner } from "../payout/authorization.js";
 import type { PayoutBroadcaster } from "../payout/broadcaster.js";
+import { mintInternalAuthorization } from "../payout/internal-authorization.js";
 import type { FeeSweepPlanner } from "./fee-sweep-planner.js";
 
 /** No treasury address is configured, so a real transfer has nowhere to go. */
@@ -29,6 +31,12 @@ export interface FeeSweepServiceOptions {
   treasuryAddressFor: (chain: string) => string | undefined;
   /** Provisions native gas before a token transfer (ADR 0011). */
   gatherStrategies?: GatherStrategyRegistry;
+  /**
+   * Mints the authorization token each sweep leg carries (§7). Required whenever
+   * the broadcaster is the authorizing one, since a transfer with no token is
+   * refused at the signing boundary — which is the point.
+   */
+  authorizer?: AuthorizationSigner;
   /**
    * The same lease payouts take. Without it this races the payout path for the
    * same balances — the console is a third writer against those addresses, not a
@@ -169,6 +177,20 @@ export class FeeSweepService {
                 idempotencyKey: legKey,
               });
             }
+            // A sweep is a real transfer out of a custody address, so it carries
+            // the same authorization binding a tenant payout does — otherwise the
+            // authorizing broadcaster refuses it, and rightly so.
+            const authorization = this.options.authorizer
+              ? mintInternalAuthorization(this.options.authorizer, {
+                  intentId: legKey,
+                  chain: g.chain,
+                  asset,
+                  amountBaseUnits: leg.amountBaseUnits,
+                  fromAddress: leg.address,
+                  toAddress: treasuryAddress,
+                  purpose: "fee-sweep",
+                })
+              : undefined;
             await this.broadcaster.send({
               chain: g.chain,
               asset,
@@ -177,6 +199,7 @@ export class FeeSweepService {
               fromDerivationIndex: leg.derivationIndex,
               toAddress: treasuryAddress,
               idempotencyKey: legKey,
+              ...(authorization ? { authorization } : {}),
             });
             await this.ledger.post(
               feeSwept({

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   type AgentRuleAction,
   type AgentRuleCondition,
@@ -7,33 +8,30 @@ import {
 } from "@cixtech/ai";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Engine } from "../engine.js";
-import type { Tenant } from "../stores.js";
+import type { Scope, Tenant } from "../stores.js";
 
 export interface AiOptions {
   engine: Engine;
+  /**
+   * Resolve the authenticated tenant for this request, asserting a scope.
+   *
+   * Supplied by `buildApp` so these routes use the SAME authentication and the
+   * SAME scope check as every other `/v1` route. They previously re-authenticated
+   * with a private helper that took no scope argument at all, which meant a
+   * `read`-only key could register an autonomous rule whose action is
+   * PAUSE_WITHDRAWALS — the one thing scopes exist to prevent.
+   */
+  tenantOf: (req: FastifyRequest, scope?: Scope) => Tenant;
 }
 
-const header = (req: FastifyRequest, name: string): string | undefined => {
-  const v = req.headers[name];
-  return typeof v === "string" ? v : undefined;
-};
-
 export function registerAi(app: FastifyInstance, opts: AiOptions): void {
-  const { engine } = opts;
-  const aiEngine = new FinancialAiEngine(engine.sql);
+  const { engine, tenantOf } = opts;
+  // The solvency answer comes from the ledger, not from a constant.
+  const aiEngine = new FinancialAiEngine(engine.sql, {
+    isSolvent: (asset) => engine.ledger.isSolvent(asset),
+  });
   const anomalyDetector = new AnomalyDetector(engine.sql);
   const rulesEngine = new AgenticRulesEngine(engine.sql);
-
-  const authed = new WeakMap<FastifyRequest, Tenant>();
-
-  const tenantOf = async (req: FastifyRequest): Promise<Tenant> => {
-    let t = authed.get(req);
-    if (!t) {
-      t = await engine.tenants.authenticate(header(req, "x-api-key"));
-      authed.set(req, t);
-    }
-    return t;
-  };
 
   const aiQuerySchema = {
     schema: {
@@ -73,12 +71,15 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
         type: "object",
         required: ["name", "conditionType", "conditionThreshold", "action"],
         properties: {
-          name: { type: "string" },
+          name: { type: "string", minLength: 1, maxLength: 120 },
           conditionType: {
             type: "string",
             enum: ["BALANCE_BELOW", "VELOCITY_ABOVE", "ANOMALY_TRIGGERED"],
           },
-          conditionThreshold: { type: "string" },
+          // Same pattern the withdrawal schema uses for base-unit amounts. Without
+          // it a non-numeric threshold stores fine and then throws from BigInt()
+          // on every later GET /v1/ai/rules — a persistent, self-inflicted 500.
+          conditionThreshold: { type: "string", pattern: "^[0-9]+$", maxLength: 40 },
           action: {
             type: "string",
             enum: ["PAUSE_WITHDRAWALS", "NOTIFY", "AUTO_REBALANCE", "REQUIRE_APPROVAL"],
@@ -102,7 +103,7 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
    * POST /v1/ai/query — Execute natural language query on ledger & analytics.
    */
   app.post("/v1/ai/query", aiQuerySchema, async (req, reply) => {
-    const tenant = await tenantOf(req);
+    const tenant = tenantOf(req, "read");
     const { prompt } = (req.body ?? {}) as { prompt?: string };
 
     if (!prompt) {
@@ -125,7 +126,7 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
    * GET /v1/ai/anomalies — Fetch real-time risk anomalies & compliance flags.
    */
   app.get("/v1/ai/anomalies", aiAnomaliesSchema, async (req, reply) => {
-    const tenant = await tenantOf(req);
+    const tenant = tenantOf(req, "read");
     const anomalies = await anomalyDetector.detectAnomalies(tenant.id);
     return reply.status(200).send({ anomalies });
   });
@@ -135,8 +136,10 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
   /**
    * POST /v1/ai/rules — Create an autonomous financial rule.
    */
+  // Creating a rule is a control-changing mutation (PAUSE_WITHDRAWALS,
+  // REQUIRE_APPROVAL), so it takes the same scope as any other money-touching write.
   app.post("/v1/ai/rules", aiCreateRuleSchema, async (req, reply) => {
-    const tenant = await tenantOf(req);
+    const tenant = tenantOf(req, "move-funds");
     const body = (req.body ?? {}) as {
       name?: string;
       conditionType?: AgentRuleCondition;
@@ -153,7 +156,9 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
       });
     }
 
-    const id = `rule_${Math.random().toString(36).substring(2, 11)}`;
+    // randomUUID, not Math.random: this is a primary key, and ~46 bits from a
+    // non-cryptographic PRNG both collides and is guessable from a few samples.
+    const id = `rule_${randomUUID()}`;
     const now = new Date();
 
     await engine.sql.query(
@@ -180,7 +185,7 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
    * GET /v1/ai/rules — List active autonomous financial rules and evaluation results.
    */
   app.get("/v1/ai/rules", aiGetRulesSchema, async (req, reply) => {
-    const tenant = await tenantOf(req);
+    const tenant = tenantOf(req, "read");
     const evaluations = await rulesEngine.evaluateRules(tenant.id);
     return reply.status(200).send({ evaluations });
   });

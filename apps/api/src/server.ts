@@ -1,6 +1,8 @@
 import { EoaFundTransferStrategy, GatherStrategyRegistry } from "@cixtech/attribution";
 import { ChainRegistry, chainEnvOrNull } from "@cixtech/chain-config";
 import {
+  AuthorizationSigner,
+  AuthorizingBroadcaster,
   BroadcasterGasFunder,
   GasStation,
   type GasStationConfig,
@@ -14,7 +16,10 @@ import { buildApp } from "./app.js";
 import { buildRouter } from "./chains/build-router.js";
 import { openDatabase } from "./db.js";
 import { buildEngine } from "./engine.js";
+import { assertCustodyModelAcknowledged, assertPolicyConfigured } from "./policy-config.js";
 import { assertSchemaReady } from "./sql.js";
+import { tenantScopedSql } from "./tenant-scope.js";
+import { assertPublicHost } from "./webhook-url.js";
 import { FetchWebhookPoster } from "./webhooks.js";
 
 const DETECTION_INTERVAL_MS = 15_000;
@@ -37,8 +42,19 @@ const GAS_TOP_UP_MULTIPLE = 3n;
 async function main(): Promise<void> {
   const env = process.env;
   const db = openDatabase(env);
-  const sql = db.sql;
+  // Every statement the engine issues inside an authenticated request binds the
+  // RLS tenant GUC (§13); statements outside one — admin plane, detection loop,
+  // webhook dispatcher — are untouched and stay cross-tenant. See tenant-scope.ts.
+  const sql = tenantScopedSql(db.sql);
   await assertSchemaReady(sql);
+
+  // Money-out guardrails (§7): fatal on mainnet when anything is missing, loud on
+  // testnet. Checked BEFORE any chain is wired, so a misconfigured production
+  // deployment never gets as far as holding a key.
+  const policyConfig = assertPolicyConfigured(env);
+  // The signing key lives in THIS process (ADR 0007 launch path). On mainnet that
+  // has to be acknowledged explicitly rather than happening by default.
+  const custody = assertCustodyModelAcknowledged(env);
 
   const { router, engineXpub, chains, skipped } = buildRouter(env, sql);
   if (chains.length === 0)
@@ -80,17 +96,37 @@ async function main(): Promise<void> {
   }
   const treasuryIndex = env["CIXTECH_GAS_TREASURY_INDEX"];
   const treasuryAddress = env["CIXTECH_GAS_TREASURY_ADDRESS"];
+
+  /**
+   * Authorization for engine-originated transfers (§7).
+   *
+   * The gas station is assembled before `buildEngine` — the gather strategies need
+   * it — so it cannot read `engine.broadcaster`. It builds its own wrapper over
+   * the same policy key instead: `AuthorizationSigner` is a stateless HMAC, so a
+   * second instance over the same key mints and verifies identically.
+   *
+   * The important part is that it is the AUTHORIZING broadcaster either way. A gas
+   * top-up spends engine funds on chain, and it used to take the raw router —
+   * which meant an internal transfer had none of the checks a tenant payout does.
+   */
+  const policyKey = env["CIXTECH_POLICY_KEY"];
+  const gasAuthorizer = policyKey ? new AuthorizationSigner(policyKey, "v1") : undefined;
+  const gasBroadcaster = gasAuthorizer
+    ? new AuthorizingBroadcaster(router.broadcaster, gasAuthorizer)
+    : router.broadcaster;
+
   const gasStation = new GasStation(
     new LedgerService(new SqlLedgerStore(sql)),
     gasConfigs,
     treasuryAddress && treasuryIndex
-      ? new BroadcasterGasFunder(router.broadcaster, router.balances, {
+      ? new BroadcasterGasFunder(gasBroadcaster, router.balances, {
           nativeAssetOf: (c) => nativeAsset.get(c) ?? "",
           treasuryOf: () => ({
             address: treasuryAddress,
             derivationIndex: Number(treasuryIndex),
           }),
           topUpMultiple: GAS_TOP_UP_MULTIPLE,
+          ...(gasAuthorizer ? { authorizer: gasAuthorizer } : {}),
         })
       : undefined,
   );
@@ -142,6 +178,18 @@ async function main(): Promise<void> {
     `[chains] env=${chainEnvOrNull() ?? "unset"} live=${chains.join(",") || "none"}` +
       `${notRegistered} | gas funding: ${gasFunding}${gasHint}`,
   );
+  const ack = custody.acknowledged ? " — explicitly acknowledged" : "";
+  const mpcNote = "Threshold MPC is implemented in packages/mpc but is NOT wired into this path.";
+  console.log(
+    `[custody] signing model: HOT KEY in-process (CIXTECH_ENGINE_XPRV)${ack}. ${mpcNote}`,
+  );
+  if (policyConfig.missing.length > 0) {
+    // Reached only on a non-mainnet deployment — assertPolicyConfigured throws
+    // otherwise. Still says it out loud: a control that is off must never be
+    // discovered from a payout that should have been held.
+    const off = policyConfig.missing.join("; ");
+    console.warn(`[policy] NOT CONFIGURED: ${off} — required on mainnet, switched off here`);
+  }
 
   const engine = buildEngine({
     sql,
@@ -179,14 +227,29 @@ async function main(): Promise<void> {
       }),
     }),
     ...(approvalRequired ? { approvalsRequired: Number(approvalRequired) } : {}),
-    webhookPoster: new FetchWebhookPoster(),
+    // Re-checks the destination against DNS immediately before each delivery, so a
+    // host that has since started resolving to a private address is refused.
+    webhookPoster: new FetchWebhookPoster(async (url) => {
+      await assertPublicHost(new URL(url).hostname);
+    }),
     engineXpub,
     feeBasisPoints: Number(env["CIXTECH_FEE_BPS"] ?? "50"),
     // HSM-held policy key: mints + verifies the per-payout authorization token (§7).
-    ...(env["CIXTECH_POLICY_KEY"] ? { policyKey: env["CIXTECH_POLICY_KEY"] } : {}),
+    ...(policyKey ? { policyKey } : {}),
   });
 
   const app = await buildApp(engine, {
+    ...(env["CIXTECH_ALLOW_INSECURE_WEBHOOKS"] === "true" ? { allowInsecureWebhooks: true } : {}),
+    ...(env["CIXTECH_PUBLIC_METRICS"] === "true" ? { publicMetrics: true } : {}),
+    rateLimit: {
+      ...(env["CIXTECH_RATE_LIMIT_MAX"] ? { max: Number(env["CIXTECH_RATE_LIMIT_MAX"]) } : {}),
+      ...(env["CIXTECH_RATE_LIMIT_WINDOW_MS"]
+        ? { windowMs: Number(env["CIXTECH_RATE_LIMIT_WINDOW_MS"]) }
+        : {}),
+      ...(env["CIXTECH_RATE_LIMIT_AUTH_FAILURE_MAX"]
+        ? { authFailureMax: Number(env["CIXTECH_RATE_LIMIT_AUTH_FAILURE_MAX"]) }
+        : {}),
+    },
     admin: {
       token: env["CIXTECH_ADMIN_TOKEN"],
       limits: { maxPerPayout: maxPayout, velocityWindowMs, velocityMax },

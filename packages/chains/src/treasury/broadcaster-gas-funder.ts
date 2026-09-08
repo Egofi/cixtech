@@ -1,5 +1,7 @@
 import type { AddressBalance } from "@cixtech/attribution";
+import type { AuthorizationSigner } from "../payout/authorization.js";
 import type { PayoutBroadcaster } from "../payout/broadcaster.js";
+import { mintInternalAuthorization } from "../payout/internal-authorization.js";
 import type { GasFunder } from "./gas-station.js";
 
 export interface BroadcasterGasFunderConfig {
@@ -16,6 +18,13 @@ export interface BroadcasterGasFunderConfig {
    * re-funded on every single payout. Default 1 (exact).
    */
   topUpMultiple?: bigint;
+  /**
+   * Mints the authorization token for the funding transfer (§7). Required whenever
+   * the broadcaster is the authorizing one — which is every deployment with a
+   * policy key — because a transfer with no token is refused at the signing
+   * boundary. Absent only where no policy key is configured.
+   */
+  authorizer?: AuthorizationSigner;
 }
 
 /**
@@ -54,6 +63,17 @@ export class BroadcasterGasFunder implements GasFunder {
 
     const target = input.minNativeBaseUnits * (this.config.topUpMultiple ?? 1n);
     const amount = target - held;
+    const authorization = this.config.authorizer
+      ? mintInternalAuthorization(this.config.authorizer, {
+          intentId: input.idempotencyKey,
+          chain: input.chain,
+          asset: native,
+          amountBaseUnits: amount,
+          fromAddress: treasury.address,
+          toAddress: input.address,
+          purpose: "gas-top-up",
+        })
+      : undefined;
     await this.broadcaster.send({
       chain: input.chain,
       asset: native,
@@ -62,6 +82,7 @@ export class BroadcasterGasFunder implements GasFunder {
       fromDerivationIndex: treasury.derivationIndex,
       toAddress: input.address,
       idempotencyKey: input.idempotencyKey,
+      ...(authorization ? { authorization } : {}),
     });
     return { funded: amount };
   }

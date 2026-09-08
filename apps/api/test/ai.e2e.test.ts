@@ -30,7 +30,9 @@ describe("Phase 4: Natural Language Financial Query Engine (US-AI-01)", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.response.intent).toBe("SOLVENCY_CHECK");
-    expect(body.response.answer.toLowerCase()).toContain("solvency verified");
+    // The answer now comes from the ledger rather than a hardcoded `true`.
+    expect(body.response.answer.toLowerCase()).toMatch(/solvency (holds|invariant)/);
+    expect(typeof body.response.data.isSolvent).toBe("boolean");
   });
 });
 

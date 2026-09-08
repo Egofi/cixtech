@@ -17,6 +17,7 @@ import {
   type LedgerAccountKey,
 } from "@cixtech/types";
 import type { Engine } from "../engine.js";
+import { SCOPES, type Scope } from "../stores.js";
 
 export interface AuditEntry {
   actor: string;
@@ -435,9 +436,15 @@ export class AdminService {
       this.sql,
       this.engine.ledger,
       this.engine.feeSweepPlanner,
-      this.engine.chains.broadcaster,
+      // The AUTHORIZED broadcaster, not the raw router: a fee sweep is a real
+      // on-chain transfer and must clear the same signing-boundary check a tenant
+      // payout does. Taking engine.chains.broadcaster here gave the control plane
+      // weaker guarantees than the tenant path.
+      this.engine.broadcaster,
       {
         treasuryAddressFor: this.feeTreasuryAddressFor,
+        // Without this the authorizing broadcaster above refuses every leg.
+        ...(this.engine.authorizer ? { authorizer: this.engine.authorizer } : {}),
         killSwitch: this.killSwitch,
         // The same lease payouts take: the console is another writer against
         // these addresses, not a privileged one.
@@ -693,13 +700,22 @@ export class AdminService {
   }
 
   /** Provision a tenant; the API key is returned ONCE (only its hash is stored). */
-  createTenant(name: string): Promise<{ tenant: { id: string; name: string }; apiKey: string }> {
-    return this.engine.tenants.createTenant(name);
+  createTenant(
+    name: string,
+    scopes?: readonly Scope[],
+  ): Promise<{ tenant: { id: string; name: string }; apiKey: string }> {
+    return this.engine.tenants.createTenant(name, scopes ?? SCOPES);
   }
 
-  /** Issue an additional API key for a tenant (lost-key recovery); returned ONCE. */
-  issueKey(tenantId: string): Promise<string> {
-    return this.engine.tenants.issueKey(tenantId);
+  /**
+   * Issue an additional API key for a tenant; returned ONCE.
+   *
+   * `scopes` is what makes separation of duties configurable — issue the second
+   * credential as `["approve"]` and it can sign off on a held payout without
+   * being able to request one.
+   */
+  issueKey(tenantId: string, scopes?: readonly Scope[], label?: string): Promise<string> {
+    return this.engine.tenants.issueKey(tenantId, scopes ?? SCOPES, label);
   }
 
   /** Symbol → decimals, so a display layer never renders base units as money. */
@@ -713,8 +729,11 @@ export class AdminService {
   }
 
   /** Replace every live credential with one new key, atomically. Returned ONCE. */
-  rotateKeys(tenantId: string, reason?: string) {
-    return this.engine.tenants.rotateKeys(tenantId, ...(reason ? [{ reason }] : []));
+  rotateKeys(tenantId: string, reason?: string, scopes?: readonly Scope[]) {
+    return this.engine.tenants.rotateKeys(tenantId, {
+      ...(reason ? { reason } : {}),
+      ...(scopes ? { scopes } : {}),
+    });
   }
 
   /** Revoke a single credential by id. False when already revoked or unknown. */

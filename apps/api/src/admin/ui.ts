@@ -44,7 +44,7 @@ export const ADMIN_JS = String.raw`
   var root=document.getElementById('app');
   var poolsFundedOnly=false; // Pool addresses view: show every address or only funded ones.
 
-  function esc(s){s=(s==null?'':String(s));return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function esc(s){s=(s==null?'':String(s));return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
   function short(s){s=String(s||'');return s.length>14?s.slice(0,8)+'…'+s.slice(-4):s;}
   function when(s){if(!s)return'';var d=new Date(s);return isNaN(d)?esc(s):d.toISOString().replace('T',' ').slice(0,19);}
   function num(s){var n=String(s==null?'':s);return n.replace(/\B(?=(\d{3})+(?!\d))/g,',');}

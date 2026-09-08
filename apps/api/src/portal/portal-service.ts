@@ -3,6 +3,28 @@ import { normalBalance } from "@cixtech/ledger";
 import type { LedgerAccountKey } from "@cixtech/types";
 
 /**
+ * Reduce a delivery failure to a CATEGORY before showing it to a tenant.
+ *
+ * The raw error distinguished a refused port from an open one, an unknown host
+ * from a timeout — which turned the delivery list into a readback channel for
+ * probing our network with the webhook URL (CX-09). A tenant needs to know their
+ * endpoint is not accepting deliveries and roughly why; they do not need our
+ * connect(2) errno. The full text stays in the row for the admin console.
+ */
+export function coarsenDeliveryError(raw: string | null): string | null {
+  if (!raw) return null;
+  if (/UNSAFE_WEBHOOK_URL|private address|does not resolve/i.test(raw)) {
+    return "Endpoint rejected: the URL must be a public https address";
+  }
+  if (/redirect/i.test(raw)) return "Endpoint redirected; webhook targets must not redirect";
+  if (/timeout|aborted|ETIMEDOUT/i.test(raw)) return "Timed out waiting for your endpoint";
+  const status = /endpoint returned (\d{3})/i.exec(raw);
+  if (status) return `Endpoint returned HTTP ${status[1]}`;
+  if (/no webhook endpoint/i.test(raw)) return "No webhook endpoint configured";
+  return "Delivery failed";
+}
+
+/**
  * Tenant-scoped reads for the portal + `/v1` activity endpoints. Every query is
  * filtered by the AUTHENTICATED tenant id — a tenant can never see another
  * tenant's rows. Reuses the admin console's query shapes (journal_entry + posting
@@ -269,7 +291,7 @@ export class PortalService {
         event,
         status: r.status,
         attempts: Number(r.attempts),
-        lastError: r.last_error,
+        lastError: coarsenDeliveryError(r.last_error),
         createdAt: new Date(r.created_at).toISOString(),
       };
     });

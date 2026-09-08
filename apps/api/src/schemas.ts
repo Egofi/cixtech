@@ -427,6 +427,36 @@ export const allowlistSchema: FastifySchema = {
   },
 };
 
+export const removeAllowlistSchema: FastifySchema = {
+  summary: "Remove a payout destination from the allow-list",
+  description: [
+    "Takes effect immediately: the destination is no longer usable for payouts.",
+    "Use this the moment a destination is believed compromised — an address that",
+    "has cleared its cool-down is otherwise usable indefinitely.",
+  ].join("\n"),
+  tags: ["payouts"],
+  params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+  querystring: {
+    type: "object",
+    required: ["chain", "address"],
+    properties: {
+      chain: { type: "string", minLength: 1, maxLength: 32 },
+      address: { type: "string", minLength: 25, maxLength: 64 },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      properties: {
+        chain: { type: "string" },
+        address: { type: "string" },
+        removed: { type: "boolean" },
+      },
+    },
+    404: errorResponse,
+  },
+};
+
 export const setWebhookSchema: FastifySchema = {
   summary: "Configure the tenant's outbound webhook",
   tags: ["webhooks"],

@@ -29,15 +29,18 @@ async function main() {
     const pool = new Pool({ connectionString: dbUrl, ssl, connectionTimeoutMillis: 3000 });
 
     try {
-      await pool.query("INSERT INTO tenant (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING", [
-        tenantId,
-        tenantName,
-      ]);
+      await pool.query(
+        "INSERT INTO tenant (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+        [tenantId, tenantName],
+      );
       await pool.query(
         "INSERT INTO api_key (key_hash, tenant_id, id, scopes, label) VALUES ($1, $2, $3, $4, $5)",
         [keyHash, tenantId, keyId, scopes, "app-role-test-key"],
       );
-      const hostLabel = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1") ? "Local Docker Postgres" : "Configured DATABASE_URL";
+      const hostLabel =
+        dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1")
+          ? "Local Docker Postgres"
+          : "Configured DATABASE_URL";
       console.log(`  ✓ Inserted key into ${hostLabel}`);
       successCount++;
     } catch (err) {

@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { chainEnvOrNull } from "@cixtech/chain-config";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { UnauthorizedError } from "../stores.js";
+import { UnauthorizedError, parseScopes } from "../stores.js";
 import type { AdminService } from "./admin-service.js";
 import { ADMIN_CSS, ADMIN_HTML, ADMIN_JS } from "./ui.js";
 
@@ -188,23 +188,33 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
     return { id, status: "dead" };
   });
   app.post("/admin/api/tenants", hidden, async (req, reply) => {
-    const name = ((req.body ?? {}) as { name?: string }).name;
+    const body = (req.body ?? {}) as { name?: string; scopes?: unknown };
+    const name = body.name;
     if (!name) return reply.status(400).send({ error: { code: "BAD_REQUEST", message: "name" } });
-    // Audit records the tenant name, never the API key that is returned.
-    const created = (await mutate(req, "tenant.create", name, { name }, () =>
-      service.createTenant(name),
+    // Optional `scopes` — omitted means all three, which is the right default for
+    // a tenant's FIRST key. The point is that a restricted one can now be asked for.
+    const scopes = parseScopes(body.scopes);
+    // Audit records the tenant name and the scopes granted, never the API key.
+    const created = (await mutate(req, "tenant.create", name, { name, scopes }, () =>
+      service.createTenant(name, scopes),
     )) as Awaited<ReturnType<AdminService["createTenant"]>>;
-    return reply.status(201).send(created);
+    return reply.status(201).send({ ...created, scopes });
   });
   // Lost-key recovery: issue an ADDITIONAL key for a tenant. The plaintext is
   // returned once and only its hash is stored; the audit records the tenant id,
   // never the key.
   app.post("/admin/api/tenants/:id/keys", hidden, async (req, reply) => {
     const { id } = req.params as { id: string };
-    const apiKey = (await mutate(req, "tenant.issue_key", id, undefined, () =>
-      service.issueKey(id),
+    const body = (req.body ?? {}) as { scopes?: unknown; label?: string };
+    // This is how separation of duties is actually configured: issue the second
+    // credential as {"scopes":["approve"]} and it can sign off on a held payout
+    // without being able to request one. Every key used to carry every scope,
+    // which made the documented boundary impossible to express.
+    const scopes = parseScopes(body.scopes);
+    const apiKey = (await mutate(req, "tenant.issue_key", id, { scopes, label: body.label }, () =>
+      service.issueKey(id, scopes, body.label),
     )) as string;
-    return reply.status(201).send({ tenantId: id, apiKey });
+    return reply.status(201).send({ tenantId: id, apiKey, scopes });
   });
 
   // Credential identity and status. Never the keys themselves — only their hashes
@@ -219,9 +229,11 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
   // credentials stop working. The audit records which key ids were retired.
   app.post("/admin/api/tenants/:id/keys/rotate", hidden, async (req, reply) => {
     const { id } = req.params as { id: string };
-    const reason = ((req.body ?? {}) as { reason?: string }).reason;
-    const out = (await mutate(req, "tenant.rotate_keys", id, { reason }, async () => {
-      const r = await service.rotateKeys(id, reason);
+    const body = (req.body ?? {}) as { reason?: string; scopes?: unknown };
+    const reason = body.reason;
+    const scopes = parseScopes(body.scopes);
+    const out = (await mutate(req, "tenant.rotate_keys", id, { reason, scopes }, async () => {
+      const r = await service.rotateKeys(id, reason, scopes);
       // Audit the ids that were retired, never the plaintext that was issued.
       return r;
     })) as Awaited<ReturnType<AdminService["rotateKeys"]>>;
@@ -233,9 +245,13 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
       result: "ok",
       ip: req.ip,
     });
-    return reply
-      .status(201)
-      .send({ tenantId: id, apiKey: out.apiKey, keyId: out.keyId, revoked: out.revokedKeyIds });
+    return reply.status(201).send({
+      tenantId: id,
+      apiKey: out.apiKey,
+      keyId: out.keyId,
+      scopes,
+      revoked: out.revokedKeyIds,
+    });
   });
 
   // Revoke ONE credential, leaving the tenant's other keys alone.

@@ -10,14 +10,42 @@ export interface WebhookPoster {
   ): Promise<{ ok: boolean; status: number }>;
 }
 
+/**
+ * Posts to a tenant's endpoint over the network.
+ *
+ * Two things here are security controls rather than plumbing:
+ *
+ * `assertAllowed` re-validates the destination immediately before the request.
+ * The URL was already checked when the tenant registered it, but DNS can change
+ * in between — a name that resolved publicly at set time can resolve to
+ * 169.254.169.254 by the time we dial it. Validating only once is what makes DNS
+ * rebinding work. The guard is injected so this package stays free of DNS policy;
+ * `apps/api` supplies it.
+ *
+ * `redirect: "manual"` stops a 302 from walking the request somewhere the guard
+ * never saw. A webhook receiver has no legitimate reason to redirect us, and
+ * following one would undo every check above it.
+ */
 export class FetchWebhookPoster implements WebhookPoster {
+  constructor(
+    private readonly assertAllowed?: (url: string) => Promise<void>,
+    private readonly timeoutMs = 10_000,
+  ) {}
+
   async post(url: string, body: string, headers: Record<string, string>) {
+    await this.assertAllowed?.(url);
     const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
       body,
-      signal: AbortSignal.timeout(10_000),
+      redirect: "manual",
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
+    // `redirect: "manual"` surfaces a 3xx as a normal response; treat it as a
+    // failure so it retries and dead-letters instead of silently succeeding.
+    if (res.status >= 300 && res.status < 400) {
+      throw new Error(`endpoint redirected (${res.status}); webhook targets must not redirect`);
+    }
     return { ok: res.ok, status: res.status };
   }
 }

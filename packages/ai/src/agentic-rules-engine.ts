@@ -1,7 +1,11 @@
 import type { SqlClient } from "@cixtech/ledger";
 
 export type AgentRuleCondition = "BALANCE_BELOW" | "VELOCITY_ABOVE" | "ANOMALY_TRIGGERED";
-export type AgentRuleAction = "NOTIFY" | "PAUSE_WITHDRAWALS" | "AUTO_REBALANCE" | "REQUIRE_APPROVAL";
+export type AgentRuleAction =
+  | "NOTIFY"
+  | "PAUSE_WITHDRAWALS"
+  | "AUTO_REBALANCE"
+  | "REQUIRE_APPROVAL";
 
 export interface AgentRule {
   id: string;

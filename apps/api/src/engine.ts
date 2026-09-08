@@ -15,6 +15,7 @@ import {
   DepositIngestor,
   type DepositScreener,
   FeeSweepPlanner,
+  type PayoutBroadcaster,
   PayoutJournal,
   PayoutService,
   type PolicyEngine,
@@ -84,6 +85,27 @@ const DEFAULT_ALLOWLIST_COOLDOWN_MS = 24 * 60 * 60_000;
 
 export interface Engine {
   sql: SqlClient;
+  /**
+   * The ONLY broadcaster any value-moving path may use.
+   *
+   * `chains.broadcaster` is the raw router: it signs and sends whatever it is
+   * handed. This one is wrapped in `AuthorizingBroadcaster` whenever a policy key
+   * is configured, so a transfer must carry a token whose sighash binds the
+   * amount, destination and from-address before anything is signed.
+   *
+   * It exists on the interface because the fee sweep and the gas station used to
+   * reach past `PayoutService` and take the raw one — which meant the control
+   * plane could move funds with weaker guarantees than a tenant payout. Anything
+   * that spends custody funds resolves it from here.
+   */
+  broadcaster: PayoutBroadcaster;
+  /**
+   * Mints authorization tokens for ENGINE-originated transfers (gas top-ups, fee
+   * sweeps), so they clear the same signing-boundary check a tenant payout does.
+   * Undefined only when no policy key is configured, in which case `broadcaster`
+   * is the raw one and nothing is checked anyway.
+   */
+  authorizer: AuthorizationSigner | undefined;
   /** Decides what the platform is owed and which addresses can settle it. */
   feeSweepPlanner: FeeSweepPlanner;
   /** Serialises everything that spends one merchant's pool addresses on a chain. */
@@ -169,6 +191,8 @@ export function buildEngine(cfg: EngineConfig): Engine {
 
   return {
     sql: cfg.sql,
+    broadcaster,
+    authorizer,
     feeSweepPlanner,
     gatherLease,
     gatherConfig,

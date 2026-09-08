@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
-import { auth, makeApi } from "./harness.js";
+import { adminAuth, auth, makeApi } from "./harness.js";
 
 async function newAccount(app: FastifyInstance, apiKey: string): Promise<string> {
   const r = await app.inject({
@@ -71,10 +71,17 @@ describe("API hardening", () => {
     expect(res.json()).toEqual({ status: "ready" });
   });
 
-  it("exposes Prometheus metrics", async () => {
+  it("exposes Prometheus metrics to an authorised scraper, and nobody else", async () => {
     const { app, apiKey } = await makeApi();
     await newAccount(app, apiKey); // generate a request to count
-    const res = await app.inject({ method: "GET", url: "/metrics" });
+
+    // /metrics publishes the Node version, process start time and per-route
+    // request counts by status — enough to fingerprint the deployment and profile
+    // tenant activity. It used to be public.
+    const anonymous = await app.inject({ method: "GET", url: "/metrics" });
+    expect(anonymous.statusCode).toBe(401);
+
+    const res = await app.inject({ method: "GET", url: "/metrics", headers: adminAuth() });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain("http_requests_total");
     expect(res.body).toContain("http_request_duration_seconds");

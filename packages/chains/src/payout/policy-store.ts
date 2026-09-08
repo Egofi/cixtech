@@ -172,13 +172,37 @@ export class SqlAllowlist implements Allowlist {
     now: Date = new Date(),
   ): Promise<{ usableAt: Date }> {
     const usableAt = new Date(now.getTime() + Math.max(0, cooldownMs));
-    await this.sql.query(
+    // RETURNING the stored row, not the value just computed. `DO NOTHING` means a
+    // re-add keeps the ORIGINAL cool-down, so returning the fresh one told the
+    // caller an address was locked when it was already usable — a misleading
+    // answer at exactly the moment (an incident) when it matters most.
+    const { rows } = await this.sql.query<{ usable_at: string }>(
       `INSERT INTO payout_allowlist (tenant, merchant, chain, address, usable_at, added_at)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (tenant, merchant, chain, address) DO NOTHING`,
+       ON CONFLICT (tenant, merchant, chain, address) DO UPDATE
+         SET usable_at = payout_allowlist.usable_at
+       RETURNING usable_at`,
       [tenant, merchant, chain, address, usableAt.toISOString(), now.toISOString()],
     );
-    return { usableAt };
+    return { usableAt: rows[0] ? new Date(rows[0].usable_at) : usableAt };
+  }
+
+  /**
+   * Remove a destination from the allow-list. Returns false when it was not there.
+   *
+   * There was no way to do this at all: an address could be added and, once its
+   * cool-down elapsed, was permanently usable. A tenant who learns a destination
+   * is compromised needs to be able to withdraw it, and needs that to take effect
+   * immediately — so this is a delete, not a soft flag with its own window.
+   */
+  async remove(tenant: string, merchant: string, chain: string, address: string): Promise<boolean> {
+    const { rows } = await this.sql.query<{ address: string }>(
+      `DELETE FROM payout_allowlist
+        WHERE tenant = $1 AND merchant = $2 AND chain = $3 AND address = $4
+       RETURNING address`,
+      [tenant, merchant, chain, address],
+    );
+    return rows.length > 0;
   }
 
   async usable(ctx: PayoutContext, now: Date): Promise<boolean> {

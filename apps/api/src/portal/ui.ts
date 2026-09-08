@@ -49,7 +49,7 @@ export const PORTAL_JS = String.raw`
   var root=document.getElementById('app');
   var flash=null; // one-shot banner {cls,msg} shown by the next screen render
 
-  function esc(s){s=(s==null?'':String(s));return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function esc(s){s=(s==null?'':String(s));return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
   function short(s){s=String(s||'');return s.length>18?s.slice(0,10)+'…'+s.slice(-5):s;}
   function when(s){if(!s)return'';var d=new Date(s);return isNaN(d)?esc(s):d.toISOString().replace('T',' ').slice(0,19);}
   function num(s){var n=String(s==null?'':s);return n.replace(/\B(?=(\d{3})+(?!\d))/g,',');}

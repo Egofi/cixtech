@@ -9,11 +9,13 @@ import {
   SqlKillSwitch,
   deriveTronAddress,
 } from "@cixtech/chains";
+import type { SqlClient } from "@cixtech/ledger";
 import { freshDatabase } from "@cixtech/testing";
 import { HDKey } from "@scure/bip32";
 import { buildApp } from "../src/app.js";
 import { buildEngine } from "../src/engine.js";
 import { applySchemas } from "../src/sql.js";
+import { tenantScopedSql } from "../src/tenant-scope.js";
 import type { WebhookPoster } from "../src/webhooks.js";
 
 export const DEST = "TTetbYe8bRMfz6ASefJACCb2gSzwbe9AqW";
@@ -52,6 +54,12 @@ export interface Overrides {
   adminToken?: string;
   /** Extra chain plugins to register beyond the default TRON fake (for multi-chain tests). */
   extraChains?: ConstructorParameters<typeof ChainRouter>[0];
+  /**
+   * Wrap the raw client BEFORE the tenant scope wraps it, so a test can observe
+   * the statements the engine actually issues — including the `set_config` that
+   * binds row-level security.
+   */
+  wrapSql?: (sql: SqlClient) => SqlClient;
 }
 
 export const ADMIN_TOKEN = "test-admin-token";
@@ -76,8 +84,10 @@ function fakeRouter(o: Overrides, broadcaster: PayoutBroadcaster): ChainRouter {
 /** Build a full API + engine on a fresh Postgres schema, with overridable chain edges. */
 export async function makeApi(o: Overrides = {}) {
   const db = await freshDatabase();
-  const sql = db.sql;
-  await applySchemas(sql);
+  // Mirrors production wiring: the engine sees the tenant-scoped client, so the
+  // RLS GUC is bound on every authenticated request (§13) in tests too.
+  await applySchemas(db.sql);
+  const sql = tenantScopedSql(o.wrapSql ? o.wrapSql(db.sql) : db.sql);
   const broadcaster = new FakeBroadcaster();
   const engine = buildEngine({
     sql,

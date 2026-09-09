@@ -2,21 +2,10 @@ import { Worker } from "bullmq";
 import type IORedis from "ioredis";
 import { QUEUE_POOL_RELEASE, connectionOpts } from "../queues.js";
 
-/**
- * The pool release function — returns cooled addresses to AVAILABLE (ADR 0009).
- * Matches `Engine.releaseCooledAddresses` in the API server.
- */
 export interface PoolReleaseFn {
   releaseCooledAddresses(now?: Date): Promise<number>;
 }
 
-/**
- * BullMQ worker for pool cool-off sweep (ADR 0009).
- *
- * Replaces the `setInterval` in `server.ts` that calls `releaseCooledAddresses`.
- * Without this running, pool addresses stay COOLING forever and every deposit
- * mints a fresh index — the pool grows without bound.
- */
 export function startPoolReleaseWorker(
   redis: IORedis,
   pool: PoolReleaseFn,

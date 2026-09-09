@@ -1,33 +1,19 @@
-# cixtech — task runner.
-#
-#   make            list every target
-#   make setup      install deps, then migrate the database
-#   make dev        run the engine
-#   make test       run the whole suite (no database setup needed)
-#
-# Everything here wraps the underlying pnpm scripts; nothing is Make-only,
-# so `pnpm test` etc. still work if you prefer them.
-
 SHELL := /usr/bin/env bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 MAKEFLAGS += --no-print-directory
 
-# backend/.env, loaded by the node runners (see dev-run.mjs).
 ENV_FILE := .env
-# Values copied verbatim from .env.example — the same markers the code rejects.
 PLACEHOLDERS := ep-REPLACE|ep-xxx|:PASSWORD@|://OWNER:|user:pass@|REPLACE_ME
 
 BASE_URL ?= http://localhost:3000
 WEB_URL  ?= http://localhost:8080
-# `make test PKG=ledger` scopes to one module's tests (test/<module>/).
 PKG ?=
 
 .PHONY: help setup install clean reset dev smoke urls \
         db-migrate db-role db-check verify-chains \
         test test-watch test-live typecheck lint format guard ci
 
-# ─────────────────────────────────────────────────────────────────────────────
 help: ## Show this help
 	@printf "\n\033[1mcixtech\033[0m — licensed multi-tenant custody engine\n\n"
 	@awk 'BEGIN {FS = ":.*##"} \
@@ -55,11 +41,6 @@ reset: clean ## Clean, then reinstall from scratch
 
 ##@ Run
 
-# The three services deploy independently, so they run independently too. `dev`
-# starts the API alone, which is enough for API work — but note that DEPOSIT
-# DETECTION lives in the worker now, so deposits are not credited unless
-# `make dev-worker` is also running (or REDIS_URL is unset, in which case the API
-# falls back to its own in-process loops for single-process development).
 dev: check-env ## Start the backend API (reads .env; requires a migrated database)
 	pnpm dev
 
@@ -70,12 +51,6 @@ dev-web: ## Run the consoles on :8080 with hot reload (Next dev server)
 	@cd ../frontend && pnpm dev
 
 ##@ Docker (three independently deployable images)
-
-# NOTE: `dev-web` and the third line of `images` reach into ../frontend, which is
-# the only place this workdir looks outside itself. They are development
-# conveniences — nothing in the build or the test suite depends on them. If
-# backend/ and frontend/ become separate repositories, drop those two lines;
-# everything else here keeps working unchanged.
 
 images: ## Build all three images
 	docker build -f Dockerfile.api    -t cixtech-api .
@@ -119,7 +94,6 @@ db-check: check-env ## Report whether .env is usable (no placeholders, URL prese
 
 ##@ Test
 
-# The suite starts its own real PostgreSQL (embedded, no Docker, no DATABASE_URL).
 test: ## Run the full test suite
 ifeq ($(strip $(PKG)),)
 	pnpm test
@@ -156,9 +130,6 @@ verify-chains: ## Ask each configured chain to confirm its own id and token cont
 
 ci: typecheck lint guard test ## Everything CI runs
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Internal: fail early, with the fix, rather than letting the driver emit a DNS
-# error. Mirrors the placeholder check in @cixtech/postgres.
 .PHONY: check-env
 check-env:
 	@test -f $(ENV_FILE) || { \

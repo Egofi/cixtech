@@ -1,10 +1,12 @@
 import type { Attribution } from "@/attribution";
-import type { ChainDeposit } from "@/chains/chain-adapter.js";
+
 import { DepositIngestor } from "@/chains/ingest/deposit-ingestor.js";
 import { parseTrc20Response } from "@/chains/tron/trc20.js";
-import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore } from "@/ledger";
-import type { SqlClient } from "@/ledger";
-import { Asset, LedgerAccountKey } from "@/types";
+import { LEDGER_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService } from "@/services";
+import { SqlLedgerStore } from "@/stores";
+
+import { Asset, type ChainDeposit, LedgerAccountKey, type SqlClient } from "@/types";
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
 
@@ -14,7 +16,6 @@ const POOL = LedgerAccountKey("pool_addr:TRON:m1");
 const AVAILABLE = LedgerAccountKey("merchant_available:t1:m1");
 const FEE = LedgerAccountKey("egofi_fee_revenue:t1");
 
-// One address book maps the recipient to merchant m1 / tenant t1 at 0.50%.
 const attribution: Attribution = {
   async resolve(chain, address) {
     if (chain === "TRON" && address === RECIPIENT) {
@@ -52,16 +53,16 @@ describe("money-in: TRC20 deposit → ledger credit", () => {
     const { ledger, ingestor } = await harness();
     expect((await ingestor.ingestConfirmed(deposit())).status).toBe("credited");
 
-    expect(await ledger.getBalance(POOL, USDT)).toBe(1_000_000n); // whole gross in the pool
-    expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(995_000n); // merchant net
-    expect(await ledger.availableBalance(FEE, USDT)).toBe(5_000n); // egofi 0.5%
+    expect(await ledger.getBalance(POOL, USDT)).toBe(1_000_000n);
+    expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(995_000n);
+    expect(await ledger.availableBalance(FEE, USDT)).toBe(5_000n);
   });
 
   it("never double-credits a re-observed transaction", async () => {
     const { ledger, ingestor } = await harness();
     await ingestor.ingestConfirmed(deposit());
     expect((await ingestor.ingestConfirmed(deposit())).status).toBe("duplicate");
-    expect(await ledger.getBalance(POOL, USDT)).toBe(1_000_000n); // still once
+    expect(await ledger.getBalance(POOL, USDT)).toBe(1_000_000n);
   });
 
   it("does not credit a deposit to an unknown address", async () => {

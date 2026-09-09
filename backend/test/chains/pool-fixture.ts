@@ -1,19 +1,10 @@
-import {
-  type AddressBalance,
-  POOL_SCHEMA_SQL,
-  PoolGatherer,
-  PoolManager,
-  SqlPoolStore,
-} from "@/attribution";
-import type { SqlClient } from "@/ledger";
+import { type AddressBalance, PoolGatherer, PoolManager } from "@/attribution";
+import { POOL_SCHEMA_SQL } from "@/schemas/sql";
+import { SqlPoolStore } from "@/stores";
+import type { SqlClient } from "@/types";
+
 import { type TestDatabase, freshDatabase } from "@test/support/index.js";
 
-/**
- * A gatherer whose pool holds one address (at index 0) for the merchant, funded
- * plentifully — so PayoutService.gatherSingle deterministically selects it. The
- * on-chain balance is faked; the point of these tests is the gather + flow, not
- * balance discovery.
- */
 export async function fundedGatherer(
   db: TestDatabase,
   sql: SqlClient,

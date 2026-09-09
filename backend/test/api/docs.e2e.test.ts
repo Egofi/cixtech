@@ -4,7 +4,7 @@ import { makeApi } from "./harness.js";
 describe("interactive API docs (Scalar)", () => {
   it("serves the reference UI at /docs without auth", async () => {
     const { app } = await makeApi();
-    // The plugin canonicalizes /docs → /docs/ with a redirect.
+
     const bare = await app.inject({ method: "GET", url: "/docs" });
     expect(bare.statusCode).toBe(301);
     const res = await app.inject({ method: "GET", url: "/docs/" });
@@ -23,7 +23,7 @@ describe("interactive API docs (Scalar)", () => {
     };
     expect(spec.info.title).toBe("cixtech Custody API");
     expect(spec.info.description).toContain("x-api-key");
-    // The key routes a tenant tests from the docs — including the new activity reads.
+
     for (const path of [
       "/v1/accounts",
       "/v1/accounts/{id}/deposit-addresses",

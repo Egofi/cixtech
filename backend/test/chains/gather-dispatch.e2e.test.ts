@@ -1,24 +1,28 @@
 import {
   EoaFundTransferStrategy,
-  type GatherStrategy,
-  type GatherStrategyKind,
   GatherStrategyRegistry,
-  POOL_SCHEMA_SQL,
   PoolGatherer,
   PoolManager,
-  SqlPoolStore,
-  UnknownGatherStrategyError,
 } from "@/attribution";
-import type {
-  BroadcastResult,
-  PayoutBroadcaster,
-  PayoutRequest,
-} from "@/chains/payout/broadcaster.js";
-import { PAYOUT_JOURNAL_SCHEMA_SQL, PayoutJournal } from "@/chains/payout/payout-journal.js";
-import { PayoutService } from "@/chains/payout/payout-service.js";
+import type { GatherStrategy } from "@/attribution";
+import type { PayoutBroadcaster } from "@/chains/payout/broadcaster.js";
+import { PayoutJournal } from "@/chains/payout/payout-journal.js";
+import { LEDGER_SCHEMA_SQL, PAYOUT_JOURNAL_SCHEMA_SQL, POOL_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService, PayoutService } from "@/services";
+import { SqlLedgerStore, SqlPoolStore } from "@/stores";
+
 import { PolicyEngine } from "@/chains/payout/policy.js";
-import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore, depositFinalized } from "@/ledger";
-import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
+import { UnknownGatherStrategyError } from "@/common";
+import { depositFinalized } from "@/ledger";
+import {
+  Asset,
+  type BroadcastResult,
+  type GatherStrategyKind,
+  IdempotencyKey,
+  JournalEntryId,
+  LedgerAccountKey,
+  type PayoutRequest,
+} from "@/types";
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
 
@@ -29,7 +33,6 @@ const ASSET = "USDC";
 const DEST = "0xdestination";
 const GAS_PER_TRANSFER = 10_000_000_000_000_000n;
 
-/** Records the exact order of gas top-ups and token transfers. */
 class RecordingBroadcaster implements PayoutBroadcaster {
   readonly calls: Array<{ asset: string; to: string; from: string; amount: bigint }> = [];
   async send(req: PayoutRequest): Promise<BroadcastResult> {
@@ -54,7 +57,6 @@ async function harness(strategies: GatherStrategyRegistry, mintAs: GatherStrateg
   });
   const address = await pool.assign(T, M, CHAIN, "inv-1", "xpub");
 
-  // Credit a deposit so the merchant has a liability balance to draw down.
   await ledger.post(
     depositFinalized({
       id: JournalEntryId("d1"),
@@ -120,8 +122,6 @@ describe("payout gather dispatch (ADR 0011 + §6.2)", () => {
 
     await payouts.payout(payoutParams());
 
-    // The whole point: an ERC-20 transfer is executed BY the pool address, which
-    // holds only USDC. Without the top-up first, this broadcast reverts for gas.
     expect(funder.calls).toEqual([
       { asset: "POL", to: address, from: "0xtreasury", amount: GAS_PER_TRANSFER },
     ]);
@@ -141,8 +141,7 @@ describe("payout gather dispatch (ADR 0011 + §6.2)", () => {
       },
     });
     const strategies = new GatherStrategyRegistry([spy("EOA_FUND_TRANSFER"), spy("FORWARDER")]);
-    // Address minted under FORWARDER; the payout must prepare it as a FORWARDER
-    // even though EOA is also registered and is the default.
+
     const { payouts } = await harness(strategies, "FORWARDER");
 
     await payouts.payout(payoutParams());
@@ -150,15 +149,12 @@ describe("payout gather dispatch (ADR 0011 + §6.2)", () => {
   });
 
   it("refuses the payout when the address's strategy has no implementation", async () => {
-    // Simulates retiring a strategy while addresses minted under it still hold
-    // funds. Substituting another one would broadcast a transfer that cannot move
-    // them, so the payout must fail loudly instead.
     const strategies = new GatherStrategyRegistry([
       new EoaFundTransferStrategy((_c, _x, i) => `0xpool${i}`),
     ]);
     const { payouts, broadcaster } = await harness(strategies, "FORWARDER");
 
     await expect(payouts.payout(payoutParams())).rejects.toBeInstanceOf(UnknownGatherStrategyError);
-    expect(broadcaster.calls).toHaveLength(0); // nothing was sent
+    expect(broadcaster.calls).toHaveLength(0);
   });
 });

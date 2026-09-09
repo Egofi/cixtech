@@ -2,14 +2,12 @@ import { createHash } from "node:crypto";
 import type { HttpClient } from "@/chains/http.js";
 import { tronAddressFromPubkey, tronAddressToHex } from "@/chains/index.js";
 import { TronPayoutBroadcaster } from "@/chains/payout/tron-broadcaster.js";
-import { TronTxMismatchError, decodeTronRawData } from "@/chains/tron/tron-tx-verify.js";
+import { decodeTronRawData } from "@/chains/tron/tron-tx-verify.js";
+import { TronTxMismatchError } from "@/common";
 import { KeypairSigner } from "@/signing";
 import { HDKey } from "@scure/bip32";
 import { describe, expect, it } from "vitest";
 
-// ── Minimal protobuf ENCODER, so the fixtures below are real Tron wire format ──
-// The verifier has its own decoder; encoding independently here means a bug in
-// one is not silently cancelled out by the same bug in the other.
 const varint = (n: bigint): Uint8Array => {
   const out: number[] = [];
   let v = n;
@@ -28,7 +26,6 @@ const lenField = (no: number, payload: Uint8Array) =>
 const varField = (no: number, value: bigint) => cat(tag(no, 0), varint(value));
 const bytesOf = (hex: string) => Uint8Array.from(Buffer.from(hex.replace(/^0x/, ""), "hex"));
 
-/** TriggerSmartContract{owner, contract, call_value, data} inside Transaction.raw. */
 function trc20Raw(ownerHex: string, contractHex: string, calldataHex: string, callValue = 0n) {
   const trigger = cat(
     lenField(1, bytesOf(ownerHex)),
@@ -46,7 +43,6 @@ function trc20Raw(ownerHex: string, contractHex: string, calldataHex: string, ca
   );
 }
 
-/** TransferContract{owner, to, amount} inside Transaction.raw. */
 function trxRaw(ownerHex: string, toHex: string, amount: bigint) {
   const transfer = cat(
     lenField(1, bytesOf(ownerHex)),
@@ -76,7 +72,6 @@ const MERCHANT = "TTetbYe8bRMfz6ASefJACCb2gSzwbe9AqW";
 const ATTACKER = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
 const USDT = "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj";
 
-/** A Tron node under test control — returns whatever `plant` says. */
 class ScriptedNode implements HttpClient {
   broadcast: { signature?: string[] } | undefined;
   constructor(private readonly plant: (url: string, body: unknown) => unknown) {}
@@ -130,14 +125,13 @@ describe("Tron transaction verification before signing", () => {
 
     const res = await b.send(trc20Req(from) as never);
     expect(res.txId).toBe(txIdOf(raw));
-    // 65-byte r‖s‖v, hex — the honest path still signs and broadcasts.
+
     expect(node.broadcast?.signature?.[0]).toMatch(/^[0-9a-f]{130}$/);
   });
 
   it("REFUSES a substituted destination — the original attack", async () => {
     const { from, b } = broadcaster(
       new ScriptedNode(() => {
-        // Node was asked for 1 USDT to MERCHANT; it builds a drain to ATTACKER.
         const raw = trc20Raw(
           tronAddressToHex(from),
           tronAddressToHex(USDT),
@@ -180,7 +174,6 @@ describe("Tron transaction verification before signing", () => {
   it("REFUSES a txID that is not the hash of the returned body", async () => {
     const { from, b } = broadcaster(
       new ScriptedNode(() => {
-        // Honest-looking body, but the txID commits to something else entirely.
         const raw = trc20Raw(
           tronAddressToHex(from),
           tronAddressToHex(USDT),

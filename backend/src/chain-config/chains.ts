@@ -1,51 +1,6 @@
-import type { ChainEnv } from "./env.js";
-import { ConfigNotFoundError } from "./errors.js";
+import { ConfigNotFoundError } from "@/common";
+import type { ChainConfig, ChainEnv } from "@/types";
 
-export type ChainFamily = "EVM" | "UTXO" | "TRON" | "XRP";
-
-export interface FinalityRule {
-  /** Confirmations before a deposit is credited. Scaled up for high value (§9). */
-  readonly confirmations: number;
-  readonly note?: string;
-}
-
-export interface GasRule {
-  /**
-   * Native base units a pool address must hold before it can send ONE token
-   * transfer (build spec §6.2). Zero on families whose fee comes out of the
-   * transfer itself (UTXO), non-zero wherever the sender pays gas from its own
-   * balance — EVM ERC-20 and Tron TRC-20 both do, and a pool address that only
-   * ever received USDC has none of it.
-   */
-  readonly perTransferBaseUnits: bigint;
-  /** The chain's native gas asset symbol. */
-  readonly nativeAsset: string;
-}
-
-export interface ChainConfig {
-  readonly chain: string;
-  readonly family: ChainFamily;
-  /** Numeric chain id where meaningful (EVM). Undefined for non-EVM. */
-  readonly chainId?: number;
-  readonly rpcUrlEnvVar: string; // the NAME of the env var, never the URL literal
-  readonly finality: FinalityRule;
-  /** What a token payout out of a pool address costs to send. */
-  readonly gas: GasRule;
-}
-
-/**
- * Per-(chain, env) config. Only chains with a real entry are supported; the
- * registry throws on anything else rather than guessing (§16.5).
- *
- * NOTE: rpc endpoints are referenced by env-var NAME, never inlined — the
- * no-magic-constants guard forbids URL/address literals outside... nothing:
- * they live in the deployment env, not the repo.
- *
- * TODO: fill BTC, LTC, XRP for both envs. Those three are NOT more entries here
- * — BTC/LTC need a UTXO adapter family, and XRP needs the shared-account +
- * destination-tag attribution seam (§6.1, ADR 0009). The EVM family is complete
- * and adding another EVM chain IS just an entry here plus its env vars.
- */
 const CHAINS: Record<ChainEnv, Record<string, ChainConfig>> = {
   testnet: {
     TRON: {
@@ -93,9 +48,7 @@ const CHAINS: Record<ChainEnv, Record<string, ChainConfig>> = {
       chainId: 11155111, // Sepolia
       rpcUrlEnvVar: "ETHEREUM_RPC_URL",
       finality: { confirmations: 64, note: "two epochs — PoS finality" },
-      // L1 gas is the outlier: an ERC-20 transfer at a busy base fee costs an
-      // order of magnitude more than an L2's, so the per-address gather budget
-      // is sized well above Base/Arbitrum rather than shared with them.
+
       gas: { perTransferBaseUnits: 5_000_000_000_000_000n, nativeAsset: "ETH" },
     },
     AVALANCHE: {

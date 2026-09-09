@@ -1,13 +1,11 @@
-import {
-  POOL_SCHEMA_SQL,
-  PoolManager,
-  PoolState,
-  PooledAttribution,
-  SqlPoolStore,
-} from "@/attribution";
-import type { ChainDeposit } from "@/chains/chain-adapter.js";
+import { PoolManager, PoolState, PooledAttribution } from "@/attribution";
+import type { ChainDeposit } from "@/types";
+
 import { DepositIngestor } from "@/chains/ingest/deposit-ingestor.js";
-import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore } from "@/ledger";
+import { LEDGER_SCHEMA_SQL, POOL_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService } from "@/services";
+import { SqlLedgerStore, SqlPoolStore } from "@/stores";
+
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
 
@@ -42,28 +40,19 @@ describe("pool cool-off lifecycle (ADR 0009)", () => {
     const address = await pool.assign(T, M, CHAIN, "inv-1", "xpub");
     expect((await store.findByAddress(CHAIN, address))?.state).toBe(PoolState.Reserved);
 
-    // Crediting happens at finality, so that is where cool-off starts.
     expect((await ingestor.ingestConfirmed(deposit(address, "tx-1"))).status).toBe("credited");
     const cooling = await store.findByAddress(CHAIN, address);
     expect(cooling?.state).toBe(PoolState.Cooling);
     expect(cooling?.cooldownUntil).toBeInstanceOf(Date);
 
-    // Still cooling → not yet reusable.
     expect(await pool.releaseCooled(new Date(Date.now() - 1_000))).toBe(0);
     expect(await pool.assign(T, M, CHAIN, "inv-2", "xpub")).not.toBe(address);
 
-    // Cool-off elapsed → back in the pool, and reused rather than minting anew.
     expect(await pool.releaseCooled(new Date(Date.now() + COOLDOWN_MS + 1_000))).toBe(1);
     expect((await store.findByAddress(CHAIN, address))?.state).toBe(PoolState.Available);
     expect(await pool.assign(T, M, CHAIN, "inv-3", "xpub")).toBe(address);
   });
 
-  /**
-   * ADR 0009's load-bearing claim: "500 deposits across a 10-address pool
-   * accumulate into 10 addresses, not 500." That only holds if cooled addresses
-   * are actually returned — otherwise every assignment mints a fresh index and
-   * payout gather cost scales with deposit count instead of pool size.
-   */
   it("keeps the pool bounded across many sequential deposits", async () => {
     const { pool, ingestor } = await harness();
 
@@ -74,7 +63,7 @@ describe("pool cool-off lifecycle (ADR 0009)", () => {
     }
 
     const addresses = await pool.addressesForMerchant(T, M, CHAIN);
-    expect(addresses).toHaveLength(1); // reused every time, not 12 fresh indices
+    expect(addresses).toHaveLength(1);
   });
 
   it("holds a quarantined deposit's address IN_USE — never reassigned while under review", async () => {
@@ -90,7 +79,7 @@ describe("pool cool-off lifecycle (ADR 0009)", () => {
     expect((await ingestor.ingestConfirmed(deposit(address, "tx-1"))).status).toBe("quarantined");
 
     expect((await store.findByAddress(CHAIN, address))?.state).toBe(PoolState.InUse);
-    // A sweep must not hand a held address to the next invoice.
+
     expect(await pool.releaseCooled(new Date(Date.now() + COOLDOWN_MS * 10))).toBe(0);
   });
 });

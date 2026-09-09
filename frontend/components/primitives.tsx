@@ -4,15 +4,6 @@ import { type Tone, statusLabel, statusTone } from "@/lib/labels";
 import { money, moneyParts } from "@/lib/money";
 import type { ReactNode } from "react";
 
-/**
- * The shared vocabulary both consoles are built from.
- *
- * These wrap the class names in `design-system.css`, which carried over unchanged
- * from the previous consoles. React's job here is structure and state; the visual
- * system is already settled and is not being redesigned as a side effect of a
- * framework change.
- */
-
 export function Panel({
   title,
   actions,
@@ -39,17 +30,10 @@ export function Badge({ tone = "muted", children }: { tone?: Tone; children: Rea
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
-/** A status string rendered with both its plain-language label and its tone. */
 export function StatusBadge({ status }: { status: string | null | undefined }) {
   return <Badge tone={statusTone(status)}>{statusLabel(status)}</Badge>;
 }
 
-/**
- * A monetary amount.
- *
- * `raw` means the asset's decimals are unknown, so this is a base-unit count and
- * is labelled as one — never dressed up as a balance.
- */
 export function Money({ base, asset }: { base: string | null | undefined; asset?: string }) {
   const { text, raw } = moneyParts(base, asset);
   return (
@@ -60,7 +44,6 @@ export function Money({ base, asset }: { base: string | null | undefined; asset?
   );
 }
 
-/** A long identifier, truncated for the column but complete on hover and copy. */
 export function Mono({
   value,
   truncate = 0,
@@ -76,18 +59,11 @@ export function Mono({
 
 export interface Column<T> {
   header: ReactNode;
-  /** Right-align numeric columns so digits line up. */
+
   numeric?: boolean;
   cell: (row: T, index: number) => ReactNode;
 }
 
-/**
- * A table with an explicit empty state.
- *
- * "Nothing here yet" is a real answer and has to look like one — an empty table
- * body reads as a page that failed to load, which during an incident is the
- * difference between "no payouts" and "the payouts endpoint is down".
- */
 export function Table<T>({
   columns,
   rows,
@@ -108,9 +84,6 @@ export function Table<T>({
         <thead>
           <tr>
             {columns.map((c, i) => (
-              // Columns are a fixed, ordered array declared inline at each call
-              // site — never reordered, filtered or keyed by identity — so the
-              // index IS the stable identity here.
               // biome-ignore lint/suspicious/noArrayIndexKey: static column list
               <th key={i} className={c.numeric ? "num" : undefined}>
                 {c.header}
@@ -179,7 +152,6 @@ export function Hint({ children }: { children: ReactNode }) {
   return <p className="hint">{children}</p>;
 }
 
-/** Loading and error states, so no page has to invent its own. */
 export function Loading() {
   return <div className="empty">Loading…</div>;
 }

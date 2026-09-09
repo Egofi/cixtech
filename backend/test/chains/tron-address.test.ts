@@ -11,10 +11,6 @@ import { describe, expect, it } from "vitest";
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 const fromHex = (s: string) => Uint8Array.from(Buffer.from(s.replace(/^0x/, ""), "hex"));
 
-// Well-known vector: secp256k1 private key = 1 → Ethereum address
-// 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf. Tron reuses these exact 20 account
-// bytes with a 0x41 prefix + base58check, so validating the EVM bytes validates
-// the Tron address by construction.
 const PK1 = fromHex("0000000000000000000000000000000000000000000000000000000000000001");
 const ETH_ADDR_PK1 = "7e5f4552091a69125d5dfcb7b8c2659029395bdf";
 

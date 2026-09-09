@@ -1,6 +1,5 @@
+import { InterimForbiddenError, NodeRejectedError } from "@/common";
 import {
-  InterimForbiddenError,
-  NodeRejectedError,
   SignerNode,
   ThresholdSigner,
   dkg,
@@ -28,8 +27,7 @@ describe("ThresholdSigner (t-of-n, Signer port)", () => {
     expect(signer.deriveAddress(0)).toBe(hexAddress(publicKey));
     const sig = signer.signHash(0, hash);
     expect(sig).toHaveLength(65);
-    // The distributed signature verifies + recovers to the SAME public key the DKG
-    // committed to — no node ever held the whole key at rest.
+
     expect(secp256k1.verify(sig.subarray(0, 64), hash, publicKey)).toBe(true);
     expect(Buffer.from(recover(sig)).toString("hex")).toBe(Buffer.from(publicKey).toString("hex"));
   });
@@ -45,11 +43,11 @@ describe("ThresholdSigner (t-of-n, Signer port)", () => {
   it("fails closed: refuses the interim path in production, and without acknowledgment", () => {
     const { shares, publicKey } = dkg(3, 5);
     const nodes = shares.map((ks) => new SignerNode(ks));
-    // No acknowledgment → refuse.
+
     expect(() => new ThresholdSigner(nodes, 3, publicKey, hexAddress)).toThrow(
       InterimForbiddenError,
     );
-    // Production → refuse outright, even acknowledged.
+
     expect(
       () =>
         new ThresholdSigner(nodes, 3, publicKey, hexAddress, {
@@ -57,7 +55,7 @@ describe("ThresholdSigner (t-of-n, Signer port)", () => {
           production: true,
         }),
     ).toThrow(InterimForbiddenError);
-    // Same guard via the convenience builder.
+
     expect(() =>
       thresholdSignerFromShares(shares, publicKey, hexAddress, { production: true }),
     ).toThrow(InterimForbiddenError);
@@ -65,7 +63,7 @@ describe("ThresholdSigner (t-of-n, Signer port)", () => {
 
   it("a node that rejects the request blocks signing (independent re-verification)", () => {
     const { shares, publicKey } = dkg(3, 5);
-    // The 2nd of the first three nodes vetoes → the quorum cannot form.
+
     const verifiers = [() => true, () => false, () => true, () => true, () => true];
     const signer = thresholdSignerFromShares(shares, publicKey, hexAddress, { verifiers });
     expect(() => signer.signHash(0, hash)).toThrow(NodeRejectedError);
@@ -84,7 +82,7 @@ describe("ThresholdSigner (t-of-n, Signer port)", () => {
   it("refuses to combine shares from different refresh epochs", () => {
     const { shares, publicKey } = dkg(3, 5);
     const refreshed = refreshKeyShares(shares);
-    // Mix two epoch-0 shares with one epoch-1 share.
+
     const mixed = [shares[0], shares[1], refreshed[2]].map(
       (ks) => new SignerNode(ks as (typeof shares)[number]),
     );

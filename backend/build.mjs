@@ -1,12 +1,3 @@
-// Ahead-of-time build for the two runtime images.
-//
-//   pnpm build            → dist/{api,worker,migrate}.mjs
-//
-// One codebase, three entry points, two Dockerfiles. The API and the worker share
-// every module under src/ — the ledger, the chain adapters, the pool — and that
-// sharing is the whole reason they live in one workdir: the process that CREDITS a
-// deposit and the process that DEBITS a payout must agree about double-entry
-// accounting, and the surest way to guarantee that is for them to run the same code.
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { bundleFile } from "./bundle.mjs";

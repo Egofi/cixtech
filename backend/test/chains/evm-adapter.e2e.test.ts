@@ -12,7 +12,6 @@ import { describe, expect, it } from "vitest";
 const USDC = "0x1234567890abcdef1234567890abcdef12345678";
 const POOL = "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359";
 
-/** A programmable JSON-RPC endpoint: map method → handler over the request params. */
 function rpcHttp(handlers: Record<string, (params: unknown[]) => unknown>): {
   http: HttpClient;
   sent: unknown[];
@@ -33,7 +32,6 @@ function rpcHttp(handlers: Record<string, (params: unknown[]) => unknown>): {
   return { http, sent };
 }
 
-/** A Signer backed by a known secp256k1 key, so we can assert the sender. */
 function keySigner(priv: Uint8Array) {
   return {
     deriveAddress: (_i: number) => evmAddressFromPubkey(secp256k1.getPublicKey(priv, true)),
@@ -57,7 +55,7 @@ describe("EVM balance provider", () => {
     const balances = new EvmBalanceProvider(rpc, { USDC }, "ETH");
     expect(await balances.balance("BASE", POOL, "ETH")).toBe(7_000_000_000_000_000_000n);
     expect(await balances.balance("BASE", POOL, "USDC")).toBe(250_000_000n);
-    expect(await balances.balance("BASE", POOL, "DAI")).toBe(0n); // untracked → 0
+    expect(await balances.balance("BASE", POOL, "DAI")).toBe(0n);
   });
 });
 
@@ -71,7 +69,7 @@ describe("EVM payout broadcaster", () => {
       eth_getBlockByNumber: () => ({ number: toQuantity(1000n), baseFeePerGas: toQuantity(30n) }),
       eth_sendRawTransaction: (p) => {
         broadcastRaw = p[0] as string;
-        // Echo the correct hash so the broadcaster's local/remote check passes.
+
         return `0x${Buffer.from(keccak_256(Buffer.from(broadcastRaw.slice(2), "hex"))).toString("hex")}`;
       },
     });
@@ -91,7 +89,7 @@ describe("EVM payout broadcaster", () => {
     });
     expect(res.txId).toMatch(/^0x[0-9a-f]{64}$/);
     expect(sent).toHaveLength(1);
-    // Raw tx is a type-2 envelope carrying the ERC20 transfer calldata to the token.
+
     expect(broadcastRaw.startsWith("0x02")).toBe(true);
     expect(broadcastRaw).toContain(
       Buffer.from(erc20TransferData(POOL, 1_000_000n)).toString("hex"),
@@ -116,7 +114,7 @@ describe("EVM deposit detection (ERC20, finality-gated)", () => {
   it("returns only deposits buried under the confirmation depth, mapped to a symbol", async () => {
     const { http } = rpcHttp({
       eth_blockNumber: () => toQuantity(1050n),
-      // safe head = 1050 - 20 = 1030; the log at 1000 is final.
+
       eth_getLogs: () => [transferLog(1_000_000n, 1000n)],
     });
     const adapter = new EvmAdapter(new EvmRpc(http, "http://rpc"), {
@@ -142,7 +140,7 @@ describe("EVM deposit detection (ERC20, finality-gated)", () => {
       confirmations: 20,
       tokenContracts: { USDC },
     });
-    // safe = 985 < cursor 990 → nothing final yet, no getLogs call.
+
     expect(await adapter.confirmedInboundErc20(POOL, 990n)).toEqual([]);
   });
 

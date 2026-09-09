@@ -5,7 +5,7 @@ import { secp256k1 } from "@noble/curves/secp256k1";
 import { describe, expect, it } from "vitest";
 
 const TJKY = "TJkyXySVnHjqo6VDoRNxUoCh524ViKuv5h";
-// Real hex for TJky (its 0x41 address), confirmed against the Nile faucet tx.
+
 const TJKY_HEX = "416068e61a64410617446c09f76e23358fe95f3b3e";
 
 describe("tron payout encoding", () => {
@@ -26,13 +26,12 @@ describe("tron payout encoding", () => {
 });
 
 describe("RawTronSigner", () => {
-  // A throwaway key (NOT a funded one) — proves the signing primitive only.
   const PK = "0000000000000000000000000000000000000000000000000000000000000001";
 
   it("is a Signer whose signature recovers to its address (index-agnostic)", () => {
     const signer = new RawTronSigner(PK);
     expect(signer.address.startsWith("T")).toBe(true);
-    expect(signer.deriveAddress(0)).toBe(signer.address); // one key, any index
+    expect(signer.deriveAddress(0)).toBe(signer.address);
 
     const hash = Uint8Array.from(Buffer.from("abcd1234".repeat(8), "hex"));
     const sig = signer.signHash(0, hash);

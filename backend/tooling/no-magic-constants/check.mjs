@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// Property 14 guard (spec §16.5, principle 8): fail if a chain id / 0x-address /
-// rpc URL literal appears in source OUTSIDE packages/chain-config. Keeps the
-// testnet→mainnet switch a pure config swap. Dependency-free on purpose.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -16,7 +13,6 @@ const PATTERNS = [
   { name: "rpc url", re: /https?:\/\/\S*(infura|alchemy|quiknode|ankr|rpc\.)\S*/i },
 ];
 
-/** @type {string[]} */
 const findings = [];
 
 function walk(dir) {

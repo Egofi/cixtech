@@ -1,20 +1,9 @@
-import type { ChainDeposit, DepositSource } from "../chain-adapter.js";
+import type { ChainDeposit, EvmDepositSourceConfig } from "@/types";
+import type { DepositSource } from "../chain-adapter.js";
 import type { DepositCursorStore } from "../ingest/deposit-cursor.js";
 import type { EvmAdapter } from "./evm-adapter.js";
 import type { EvmRpc } from "./evm-rpc.js";
 
-export interface EvmDepositSourceConfig {
-  /** How many blocks behind the head to start watching a NEW address (never genesis). */
-  initialLookbackBlocks: number;
-}
-
-/**
- * A finality-gated, RESUMABLE EVM deposit source (ADR 0016). For each watched
- * address it scans `[cursor, head - confirmations]`, credits only finalized ERC20
- * transfers, and advances a durable cursor past the scanned range — so detection
- * survives restarts and never rescans history. A first-seen address seeds its
- * cursor a bounded lookback behind the head, so watching starts cheaply.
- */
 export class EvmDepositSource implements DepositSource {
   constructor(
     private readonly adapter: EvmAdapter,
@@ -32,7 +21,7 @@ export class EvmDepositSource implements DepositSource {
     }
 
     const { deposits, scannedTo } = await this.adapter.scanInboundErc20(address, cursor);
-    // Advance only when we actually scanned past the cursor (scannedTo >= cursor).
+
     if (scannedTo >= cursor) await this.cursors.set(chain, address, scannedTo + 1n);
     return deposits;
   }

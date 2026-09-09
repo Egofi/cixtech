@@ -1,19 +1,8 @@
-import type { LedgerService } from "@/ledger";
-import { Asset, LedgerAccountKey } from "@/types";
+import type { LedgerService } from "@/services";
+import { Asset, type GasFloatStatus, type GasStationConfig, LedgerAccountKey } from "@/types";
 import type { ReconcilerBreaker } from "../reconcile/external-reconciler.js";
 
-/**
- * Provisions native gas so an EVM/Tron pool address can actually send its ERC-20 /
- * TRC-20 payout (build spec §6.2). ERC-20 sweeps need native gas IN the address;
- * without this the transfer silently fails. Behind a port so the funding mechanism
- * (fund-then-transfer, a relayer, staked Tron energy) is swappable per chain.
- */
 export interface GasFunder {
-  /**
-   * Ensure `address` holds at least `minNativeBaseUnits` of native gas to send one
-   * transfer. Returns the amount topped up (0 if already sufficient). Idempotent on
-   * `idempotencyKey` so a retried gather never double-funds.
-   */
   fund(input: {
     chain: string;
     address: string;
@@ -22,27 +11,6 @@ export interface GasFunder {
   }): Promise<{ funded: bigint }>;
 }
 
-export interface GasStationConfig {
-  /** The native gas asset symbol for the chain (e.g. "MATIC", "BNB", "TRX", "ETH"). */
-  nativeAsset: string;
-  /** Below this `gas_float:{chain}` balance, the chain's payouts are frozen (§6.2). */
-  floorBaseUnits: bigint;
-}
-
-export interface GasFloatStatus {
-  chain: string;
-  balance: bigint;
-  floor: bigint;
-  healthy: boolean;
-}
-
-/**
- * Monitors the first-class `gas_float:{chain}` ASSET account and provisions gas for
- * payout gathers (build spec §6.2). If the float runs below its floor, payouts on
- * that chain would stall silently — so depletion TRIPS the circuit breaker
- * (per-chain kill-switch) instead, failing closed and paging a human. It reports
- * float health and, via the injected `GasFunder`, tops addresses up before a gather.
- */
 export class GasStation {
   constructor(
     private readonly ledger: LedgerService,
@@ -57,7 +25,6 @@ export class GasStation {
     return c;
   }
 
-  /** Current `gas_float:{chain}` balance vs. its floor. */
   async floatStatus(chain: string): Promise<GasFloatStatus> {
     const c = this.configFor(chain);
     const balance = await this.ledger.getBalance(
@@ -67,10 +34,6 @@ export class GasStation {
     return { chain, balance, floor: c.floorBaseUnits, healthy: balance >= c.floorBaseUnits };
   }
 
-  /**
-   * Check every configured chain's float; trip the breaker for any that is below
-   * floor (§6.2 "trip the circuit breaker on depletion"). Returns each status.
-   */
   async monitor(): Promise<GasFloatStatus[]> {
     const statuses: GasFloatStatus[] = [];
     for (const chain of this.configs.keys()) {
@@ -85,11 +48,6 @@ export class GasStation {
     return statuses;
   }
 
-  /**
-   * Provision native gas for a pool address before a gather, failing closed if the
-   * float is below floor (never drain the last of the float and strand a payout
-   * mid-flight). Requires a configured `GasFunder`.
-   */
   async provision(input: {
     chain: string;
     address: string;

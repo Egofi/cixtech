@@ -1,7 +1,14 @@
-import { CURSOR_SCHEMA_SQL, DepositCursorStore } from "@/api/chains/deposit-cursor.js";
-import { EvmDepositSource } from "@/api/chains/evm-deposit-source.js";
-import { EvmAdapter, EvmRpc, type HttpClient, toQuantity } from "@/chains";
-import type { SqlClient } from "@/ledger";
+import {
+  DepositCursorStore,
+  EvmAdapter,
+  EvmDepositSource,
+  EvmRpc,
+  type HttpClient,
+  toQuantity,
+} from "@/chains";
+import { CURSOR_SCHEMA_SQL } from "@/schemas/sql";
+import type { SqlClient } from "@/types";
+
 import { freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -9,7 +16,6 @@ const USDC = "0x1234567890abcdef1234567890abcdef12345678";
 const POOL = "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359";
 const TRANSFER = `0x${"ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}`;
 
-/** A scriptable EVM RPC where the head block advances between polls. */
 function scriptedRpc(state: { head: bigint; logsByFrom: Map<string, number> }): {
   http: HttpClient;
   getLogsCalls: { fromBlock: string; toBlock: string }[];
@@ -26,7 +32,7 @@ function scriptedRpc(state: { head: bigint; logsByFrom: Map<string, number> }): 
       else if (method === "eth_getLogs") {
         const p = params[0] as { fromBlock: string; toBlock: string };
         getLogsCalls.push({ fromBlock: p.fromBlock, toBlock: p.toBlock });
-        // One deposit at block 1000 iff the scan window covers it.
+
         const from = BigInt(p.fromBlock);
         const to = BigInt(p.toBlock);
         result =
@@ -73,21 +79,17 @@ describe("EvmDepositSource durable cursor", () => {
     const cursors = new DepositCursorStore(sql);
     const source = new EvmDepositSource(adapter, rpc, cursors, { initialLookbackBlocks: 200 });
 
-    // First poll: seed cursor = head(1100) - 200 = 900; safe = 1100 - 20 = 1080.
-    // Window [900, 1080] covers the deposit at 1000 → credited.
     const first = await source.fetchInbound("BASE", POOL);
     expect(first).toHaveLength(1);
     expect(first[0]?.amountBaseUnits).toBe(5_000_000n);
     expect(getLogsCalls[0]).toEqual({ fromBlock: toQuantity(900n), toBlock: toQuantity(1080n) });
-    expect(await cursors.get("BASE", POOL)).toBe(1081n); // advanced past the scanned window
+    expect(await cursors.get("BASE", POOL)).toBe(1081n);
 
-    // Second poll, head unchanged: safe(1080) < cursor(1081) → nothing to scan.
     const second = await source.fetchInbound("BASE", POOL);
     expect(second).toHaveLength(0);
-    expect(getLogsCalls).toHaveLength(1); // no new getLogs — cursor held
+    expect(getLogsCalls).toHaveLength(1);
 
-    // Head advances: scans only the NEW window [1081, 1100-20=... ] once final.
-    state.head = 1140n; // safe = 1120
+    state.head = 1140n;
     await source.fetchInbound("BASE", POOL);
     expect(getLogsCalls[1]).toEqual({ fromBlock: toQuantity(1081n), toBlock: toQuantity(1120n) });
     expect(await cursors.get("BASE", POOL)).toBe(1121n);

@@ -1,24 +1,26 @@
 import { createHash } from "node:crypto";
+import type { AppliedSchema, SchemaModule, SqlClient } from "@/types";
+
+import type { MigratableSqlClient } from "@/postgres";
 import {
+  ADMIN_SCHEMA_SQL,
+  AI_SCHEMA_SQL,
+  API_SCHEMA_SQL,
+  AUTH_SCHEMA_SQL,
   BALANCE_CACHE_SCHEMA_SQL,
+  CURSOR_SCHEMA_SQL,
   GATHER_CONFIG_SCHEMA_SQL,
   GATHER_LEASE_SCHEMA_SQL,
+  LEDGER_SCHEMA_SQL,
+  PAYOUT_APPROVAL_SCHEMA_SQL,
+  PAYOUT_JOURNAL_SCHEMA_SQL,
+  POLICY_SCHEMA_SQL,
   POOL_SCHEMA_SQL,
-} from "@/attribution";
-import { AUTH_SCHEMA_SQL } from "@/auth";
-import { PAYOUT_APPROVAL_SCHEMA_SQL, PAYOUT_JOURNAL_SCHEMA_SQL, POLICY_SCHEMA_SQL } from "@/chains";
-import { LEDGER_SCHEMA_SQL } from "@/ledger";
-import type { SqlClient } from "@/ledger";
-import type { MigratableSqlClient } from "@/postgres";
-import { ADMIN_SCHEMA_SQL } from "./admin/admin-schema.js";
-import { AI_SCHEMA_SQL } from "./ai/ai-schema.js";
-import { API_SCHEMA_SQL } from "./api-schema.js";
-import { CURSOR_SCHEMA_SQL } from "./chains/deposit-cursor.js";
+} from "@/schemas/sql";
 import { RLS_SCHEMA_SQL, assertTenantTablesProtected } from "./rls.js";
 
 export type { MigratableSqlClient };
 
-/** The migration bookkeeping table — applied before anything it records. */
 const MIGRATION_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schema_migration (
   name       text PRIMARY KEY,
@@ -28,15 +30,6 @@ CREATE TABLE IF NOT EXISTS schema_migration (
 );
 `;
 
-export interface SchemaModule {
-  name: string;
-  sql: string;
-}
-
-/**
- * Every schema the engine needs, in dependency order. RLS is last: its policies
- * attach to tables the preceding modules create.
- */
 export const SCHEMA_MODULES: readonly SchemaModule[] = [
   { name: "ledger", sql: LEDGER_SCHEMA_SQL },
   { name: "pool", sql: POOL_SCHEMA_SQL },
@@ -47,8 +40,7 @@ export const SCHEMA_MODULES: readonly SchemaModule[] = [
   { name: "payout-journal", sql: PAYOUT_JOURNAL_SCHEMA_SQL },
   { name: "payout-approval", sql: PAYOUT_APPROVAL_SCHEMA_SQL },
   { name: "api", sql: API_SCHEMA_SQL },
-  // After "api": principal.tenant_id references tenant(id), which that module
-  // creates. Order here is dependency order, not preference.
+
   { name: "auth", sql: AUTH_SCHEMA_SQL },
   { name: "admin", sql: ADMIN_SCHEMA_SQL },
   { name: "deposit-cursor", sql: CURSOR_SCHEMA_SQL },
@@ -59,31 +51,6 @@ export const SCHEMA_MODULES: readonly SchemaModule[] = [
 const checksum = (sql: string): string =>
   createHash("sha256").update(sql).digest("hex").slice(0, 16);
 
-export type SchemaStatus =
-  /** First time this module has been applied to this database. */
-  | "created"
-  /** Already applied and byte-identical to what is in the code. */
-  | "unchanged"
-  /**
-   * Applied before, but the module's SQL has since changed. Every statement is
-   * `IF NOT EXISTS`, so re-running it does NOT alter tables that already exist —
-   * a column added to the module will be missing here. Needs a real ALTER.
-   */
-  | "changed";
-
-export interface AppliedSchema {
-  name: string;
-  status: SchemaStatus;
-}
-
-/**
- * Apply every schema module and record what was applied (build spec §13).
- * Idempotent: each module is `CREATE ... IF NOT EXISTS`, so re-running is safe.
- *
- * The recorded checksum is what makes drift *visible*: because the DDL cannot
- * alter an existing table, a module whose SQL changed after it was first applied
- * is reported as `changed` rather than being silently treated as up to date.
- */
 export async function applySchemas(sql: MigratableSqlClient): Promise<AppliedSchema[]> {
   await sql.exec(MIGRATION_SCHEMA_SQL);
 
@@ -109,18 +76,10 @@ export async function applySchemas(sql: MigratableSqlClient): Promise<AppliedSch
     });
   }
 
-  // §13 boot guard: a tenant-scoped table with no RLS policy fails here.
   await assertTenantTablesProtected(sql);
   return applied;
 }
 
-/**
- * Assert the database already carries every schema module, without issuing DDL.
- *
- * The server calls this against managed Postgres so a production process never
- * silently mutates the schema of a custody database on boot — migrations are a
- * deliberate, auditable command (`pnpm db:migrate`), not a start-up side effect.
- */
 export async function assertSchemaReady(sql: SqlClient): Promise<void> {
   const present = await sql
     .query<{ name: string; checksum: string }>("SELECT name, checksum FROM schema_migration")

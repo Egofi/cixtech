@@ -1,14 +1,10 @@
 import { assertCustodyModelAcknowledged, assertPolicyConfigured } from "@/api/policy-config.js";
-import { SCOPES, parseScopes } from "@/api/stores.js";
+import { parseScopes } from "@/stores";
+import { SCOPES } from "@/types";
+
 import { isPrivateAddress } from "@/api/webhook-url.js";
 import { describe, expect, it } from "vitest";
 import { adminAuth, auth, makeApi } from "./harness.js";
-
-/**
- * The controls the security review (docs/SECURITY_AUDIT.md) found missing. Each
- * test names the finding it pins down, so a regression says which guarantee it
- * broke rather than only which assertion failed.
- */
 
 describe("CX-04 — money-out guardrails must be configured on mainnet", () => {
   const full = {
@@ -27,7 +23,7 @@ describe("CX-04 — money-out guardrails must be configured on mainnet", () => {
     try {
       const { CIXTECH_POLICY_KEY: _dropped, ...missingPolicyKey } = full;
       expect(() => assertPolicyConfigured(missingPolicyKey)).toThrow(/payout authorization token/);
-      // And the message says what the absence would actually mean at runtime.
+
       expect(() => assertPolicyConfigured(missingPolicyKey)).toThrow(/no authorization binding/);
     } finally {
       process.env["CHAIN_ENV"] = "testnet";
@@ -102,7 +98,7 @@ describe("CX-07 — AI routes enforce scopes", () => {
       payload: rule,
     });
     expect(allowed.statusCode).toBe(201);
-    // CX-20: the id is a UUID, not 46 bits of Math.random().
+
     expect(allowed.json().rule.id).toMatch(/^rule_[0-9a-f-]{36}$/);
   });
 
@@ -192,7 +188,6 @@ describe("CX-10 — keys can be issued with a restricted scope set", () => {
     const resolved = await engine.tenants.authenticate(issued.json().apiKey);
     expect(resolved.scopes).toEqual(["approve"]);
 
-    // The point of the boundary: it can approve, and it cannot move funds.
     const denied = await app.inject({
       method: "POST",
       url: "/v1/accounts",
@@ -285,7 +280,7 @@ describe("CX-09 — webhook URLs cannot point at internal hosts", () => {
       "fd00::1",
       "::ffff:127.0.0.1",
       "::ffff:169.254.169.254",
-      // The hex spelling the WHATWG URL parser normalises v4-mapped forms to.
+
       "::ffff:a9fe:a9fe",
       "::ffff:7f00:1",
       "::ffff:c0a8:1",
@@ -350,7 +345,6 @@ describe("CX-23 — destinations are validated for their chain at the boundary",
     });
     const id = acc.json().id as string;
 
-    // 32 chars, passes minLength/maxLength, is not a valid Tron address.
     const res = await app.inject({
       method: "POST",
       url: `/v1/accounts/${id}/allowlist`,
@@ -374,10 +368,6 @@ describe("CX-13 — security headers are present", () => {
 });
 
 describe("cross-origin access is allowlisted, never wildcarded", () => {
-  // The consoles are a separate deployment now, so their calls are cross-origin.
-  // An API that accepts a bearer credential in a HEADER must not answer `*`:
-  // that would let any page on the internet make authenticated calls with a
-  // stolen key from the victim's own browser.
   const CONSOLE = "https://console.cixtech.example";
 
   it("allows a named console origin", async () => {
@@ -389,11 +379,7 @@ describe("cross-origin access is allowlisted, never wildcarded", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.headers["access-control-allow-origin"]).toBe(CONSOLE);
-    // Credentials are now enabled, because the session is an httpOnly cookie and
-    // the browser will not send one cross-origin without it. That raises the
-    // stakes on the allowlist rather than lowering them: the spec forbids `*`
-    // with credentials, so the exact-match list below is load-bearing, and CSRF
-    // is handled separately by the double-submit token.
+
     expect(res.headers["access-control-allow-credentials"]).toBe("true");
   });
 

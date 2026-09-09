@@ -2,11 +2,6 @@ import type { AddressBalance } from "@/attribution";
 import { erc20BalanceOfData } from "./abi.js";
 import { type EvmRpc, fromQuantity } from "./evm-rpc.js";
 
-/**
- * On-chain balance for the pool gatherer (ADR 0009 §6.3): native gas token via
- * eth_getBalance, ERC20 via `balanceOf`. `tokenContracts` maps a symbol to its
- * contract on this chain; the native symbol (POL/BNB/ETH) has no contract.
- */
 export class EvmBalanceProvider implements AddressBalance {
   constructor(
     private readonly rpc: EvmRpc,

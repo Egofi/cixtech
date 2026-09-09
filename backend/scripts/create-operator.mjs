@@ -1,16 +1,3 @@
-/**
- * Create the first operator account.
- *
- *   pnpm create-operator --email you@example.com --role owner
- *
- * This is the bootstrap path, and it exists so the shared admin token never has
- * to be a permanent way in. It talks to the database directly, so it also works
- * when nobody can sign in at all — a lost password, a lost authenticator, an
- * account disabled by mistake.
- *
- * The password is generated unless one is supplied, printed once, and flagged
- * must-change so it cannot outlive the handover.
- */
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -62,8 +49,6 @@ if (!email) {
   process.exit(1);
 }
 
-// Bundle the auth module the same way the server is built, so this runs against
-// exactly the code the engine runs — not a re-implementation that can drift.
 const { bundleFile } = await import(pathToFileURL(resolve(root, "bundle.mjs")).href);
 const entry = resolve(root, ".create-operator.mjs");
 await bundleFile(resolve(root, "scripts/create-operator-entry.ts"), entry);

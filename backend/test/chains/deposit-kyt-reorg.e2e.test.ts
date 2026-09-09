@@ -1,9 +1,11 @@
 import type { Attribution } from "@/attribution";
-import type { ChainDeposit } from "@/chains/chain-adapter.js";
+
 import { DepositIngestor, type DepositScreener } from "@/chains/ingest/deposit-ingestor.js";
-import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore } from "@/ledger";
-import type { SqlClient } from "@/ledger";
-import { Asset, LedgerAccountKey } from "@/types";
+import { LEDGER_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService } from "@/services";
+import { SqlLedgerStore } from "@/stores";
+
+import { Asset, type ChainDeposit, LedgerAccountKey, type SqlClient } from "@/types";
 import { type TestDatabase, freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -49,9 +51,9 @@ describe("DepositIngestor — KYT quarantine (§14)", () => {
     const ingestor = new DepositIngestor(ledger, attribution, undefined, blockAll);
     const res = await ingestor.ingestConfirmed(deposit());
     expect(res.status).toBe("quarantined");
-    expect(await ledger.availableBalance(SUSPENSE, USDT)).toBe(1_000_000n); // held
-    expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(0n); // NOT credited
-    expect(await ledger.getBalance(POOL, USDT)).toBe(1_000_000n); // funds physically landed
+    expect(await ledger.availableBalance(SUSPENSE, USDT)).toBe(1_000_000n);
+    expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(0n);
+    expect(await ledger.getBalance(POOL, USDT)).toBe(1_000_000n);
   });
 
   it("credits normally when the screen is clear", async () => {
@@ -79,8 +81,8 @@ describe("DepositIngestor — reorg reversal (§9)", () => {
     const ingestor = new DepositIngestor(ledger, attribution);
     await ingestor.ingestConfirmed(deposit());
     await ingestor.reverseCredit(deposit());
-    await ingestor.reverseCredit(deposit()); // second reversal must be a no-op
-    expect(await ledger.getBalance(POOL, USDT)).toBe(0n); // not double-reversed into negative
+    await ingestor.reverseCredit(deposit());
+    expect(await ledger.getBalance(POOL, USDT)).toBe(0n);
   });
 
   it("is a no-op for a deposit that was never credited", async () => {

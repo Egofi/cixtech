@@ -1,4 +1,4 @@
-import type { ChainDeposit } from "@/chains";
+import type { ChainDeposit } from "@/types";
 import type { FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ADMIN_TOKEN, DEST, adminAuth, auth, makeApi } from "./harness.js";
@@ -30,13 +30,9 @@ describe("tenant portal + activity APIs", () => {
   });
 
   it("no longer serves the portal — it ships as a separate deployable", async () => {
-    // The portal moved to apps/web. Its data calls still hit the /v1 surface
-    // below with the tenant API key; only the shell moved.
     for (const url of ["/portal", "/portal/app.js", "/portal/styles.css"]) {
       const res = await ctx.app.inject({ method: "GET", url });
-      // 401 rather than 404: these paths are no longer exempt from tenant auth,
-      // so the auth hook answers before routing does. Either way nothing is
-      // served, and not confirming which paths exist is the better of the two.
+
       expect(res.statusCode, `${url} should not be served by the API`).not.toBe(200);
       expect(String(res.headers["content-type"] ?? "")).not.toContain("text/html");
     }
@@ -46,7 +42,6 @@ describe("tenant portal + activity APIs", () => {
     const { app, engine, apiKey } = ctx;
     const accountId = await createAccount(app, apiKey, "merchant-1");
 
-    // Accounts list shows it.
     const accounts = await app.inject({
       method: "GET",
       url: "/v1/accounts",
@@ -54,7 +49,6 @@ describe("tenant portal + activity APIs", () => {
     });
     expect(accounts.json().accounts).toMatchObject([{ id: accountId, externalRef: "merchant-1" }]);
 
-    // Assign an address, land a deposit, watcher enqueues the webhook.
     const addrRes = await app.inject({
       method: "POST",
       url: `/v1/accounts/${accountId}/deposit-addresses`,
@@ -65,20 +59,17 @@ describe("tenant portal + activity APIs", () => {
     expect((await engine.ingestor.ingestConfirmed(depositTo(address))).status).toBe("credited");
     await engine.webhookOutbox.enqueue(ctx.tenant.id, "deposit.confirmed", { txId: "tx-1" });
 
-    // Deposit addresses list shows the assigned address with its state.
     const addrs = await app.inject({
       method: "GET",
       url: `/v1/accounts/${accountId}/deposit-addresses`,
       headers: auth(apiKey),
     });
-    // Credited at finality → the address is already cooling down for reuse.
+
     expect(addrs.json().addresses).toMatchObject([{ chain: "TRON", address, state: "COOLING" }]);
 
-    // Balances across accounts (10M minus 0.5% fee).
     const bal = await app.inject({ method: "GET", url: "/v1/balances", headers: auth(apiKey) });
     expect(bal.json().balances).toMatchObject([{ accountId, asset: "USDT", available: "9950000" }]);
 
-    // Deposit history shows the credit with fee breakdown (fee collected, percentage, gross, net).
     const deps = await app.inject({ method: "GET", url: "/v1/deposits", headers: auth(apiKey) });
     expect(deps.json().deposits).toMatchObject([
       {
@@ -94,7 +85,6 @@ describe("tenant portal + activity APIs", () => {
       },
     ]);
 
-    // Allow-list DEST (static-set already allows it; the durable row records cool-down).
     const al = await app.inject({
       method: "POST",
       url: `/v1/accounts/${accountId}/allowlist`,
@@ -106,7 +96,6 @@ describe("tenant portal + activity APIs", () => {
     expect(alList.json().allowlist).toMatchObject([{ accountId, chain: "TRON", address: DEST }]);
     expect(alList.json().allowlist[0].usableAt).toBeTruthy();
 
-    // Request a payout (DEST is in the harness's static allow-list), then it appears in history.
     const pay = await app.inject({
       method: "POST",
       url: `/v1/accounts/${accountId}/withdrawals`,
@@ -119,7 +108,6 @@ describe("tenant portal + activity APIs", () => {
       { accountId, chain: "TRON", asset: "USDT", amount: "1000000", status: "settled" },
     ]);
 
-    // Webhook endpoint config + delivery history.
     const wh = await app.inject({
       method: "PUT",
       url: "/v1/webhook",
@@ -141,7 +129,7 @@ describe("tenant portal + activity APIs", () => {
 
   it("isolates every activity endpoint between tenants", async () => {
     const { app, engine, apiKey } = ctx;
-    // Tenant A gets an account, a deposit, a payout intent, an allowlist row, a delivery.
+
     const accountId = await createAccount(app, apiKey, "a-merchant");
     const addrRes = await app.inject({
       method: "POST",
@@ -164,7 +152,6 @@ describe("tenant portal + activity APIs", () => {
       payload: { chain: "TRON", asset: "USDT", amount: "1000000", destination: DEST },
     });
 
-    // Tenant B sees NONE of it, on every endpoint.
     const { apiKey: keyB } = await engine.tenants.createTenant("intruder");
     for (const url of [
       "/v1/accounts",
@@ -180,7 +167,7 @@ describe("tenant portal + activity APIs", () => {
       const listKey = Object.keys(body)[0] as string;
       expect(body[listKey], `${url} must be empty for tenant B`).toEqual([]);
     }
-    // And tenant B cannot read tenant A's account-scoped lists.
+
     const stolen = await app.inject({
       method: "GET",
       url: `/v1/accounts/${accountId}/deposit-addresses`,
@@ -201,12 +188,11 @@ describe("tenant portal + activity APIs", () => {
     expect(newKey).toMatch(/^cxk_/);
     expect(newKey).not.toBe(apiKey);
 
-    // Both keys authenticate to the SAME tenant.
     for (const k of [apiKey, newKey]) {
       const res = await app.inject({ method: "GET", url: "/v1/accounts", headers: auth(k) });
       expect(res.statusCode).toBe(200);
     }
-    // The issuance is audited — without leaking the key.
+
     const audit = await app.inject({
       method: "GET",
       url: "/admin/api/audit?limit=5",
@@ -221,7 +207,7 @@ describe("tenant portal + activity APIs", () => {
 
   it("rotation issues a working key AND stops every previous one — the point of rotating", async () => {
     const { app, apiKey } = ctx;
-    // A second key, so rotation has more than one credential to sweep.
+
     const extra = await app.inject({
       method: "POST",
       url: `/admin/api/tenants/${ctx.tenant.id}/keys`,
@@ -240,18 +226,14 @@ describe("tenant portal + activity APIs", () => {
     expect(fresh).toMatch(/^cxk_/);
     expect(rot.json().revoked).toHaveLength(2);
 
-    // The replacement works…
     const ok = await app.inject({ method: "GET", url: "/v1/accounts", headers: auth(fresh) });
     expect(ok.statusCode).toBe(200);
 
-    // …and BOTH old credentials are dead. This is the whole difference between
-    // rotation and merely issuing another key.
     for (const dead of [apiKey, extraKey]) {
       const res = await app.inject({ method: "GET", url: "/v1/accounts", headers: auth(dead) });
       expect(res.statusCode).toBe(401);
     }
 
-    // The rotation is audited, by key id, without the plaintext anywhere in it.
     const audit = await app.inject({
       method: "GET",
       url: "/admin/api/audit?limit=10",
@@ -262,7 +244,6 @@ describe("tenant portal + activity APIs", () => {
     expect(actions).toContain("tenant.keys_revoked");
     expect(JSON.stringify(audit.json())).not.toContain(fresh);
 
-    // The tenant's key list shows what happened, and never the keys themselves.
     const keys = await app.inject({
       method: "GET",
       url: `/admin/api/tenants/${ctx.tenant.id}/keys`,
@@ -274,7 +255,6 @@ describe("tenant portal + activity APIs", () => {
     expect(rows.find((k) => k.revokedAt !== null)?.revokedReason).toBe("key leaked");
     expect(JSON.stringify(keys.json())).not.toContain(fresh);
 
-    // Restore a usable key for any later assertion in this suite.
     ctx.apiKey = fresh;
   });
 
@@ -303,7 +283,6 @@ describe("tenant portal + activity APIs", () => {
     });
     expect(res.statusCode).toBe(200);
 
-    // Revoking the same key twice is a 404 rather than a silent success.
     const again = await app.inject({
       method: "POST",
       url: `/admin/api/tenants/${ctx.tenant.id}/keys/${newest?.id}/revoke`,
@@ -311,7 +290,6 @@ describe("tenant portal + activity APIs", () => {
     });
     expect(again.statusCode).toBe(404);
 
-    // Exactly one key died; whichever plaintext maps to it no longer authenticates.
     const after = await app.inject({
       method: "GET",
       url: `/admin/api/tenants/${ctx.tenant.id}/keys`,
@@ -332,7 +310,7 @@ describe("tenant portal + activity APIs", () => {
     });
     expect(res.statusCode).toBe(200);
     const assets = res.json().assets as Array<{ symbol: string; decimals: number }>;
-    // Without this a UI cannot tell 4.34 USDT from 4,340,000 of them.
+
     expect(assets.find((a) => a.symbol === "USDT")?.decimals).toBe(6);
     expect(assets.length).toBeGreaterThan(0);
   });

@@ -1,47 +1,17 @@
-import { AppError } from "@/errors";
+import {
+  BadContributionError,
+  InterimForbiddenError,
+  NodeRejectedError,
+  ThresholdNotMetError,
+} from "@/common";
 import type { Signer } from "@/signing";
+import type { KeyShare, Share, SigningContext, ThresholdSignerOptions } from "@/types";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { verifyShare } from "./dealerless-dkg.js";
-import { type Share, combine, randomScalar, refresh, scalarToBytes, split } from "./shamir.js";
+import { combine, randomScalar, refresh, scalarToBytes, split } from "./shamir.js";
 
-/** Encodes the threshold public key into a chain address (injected — chain-agnostic). */
 export type EncodeAddress = (publicKey: Uint8Array) => string;
 
-export interface SigningContext {
-  index: number;
-  hash: Uint8Array;
-}
-
-export class NodeRejectedError extends AppError {
-  readonly code = "MPC_NODE_REJECTED";
-}
-export class ThresholdNotMetError extends AppError {
-  readonly code = "MPC_THRESHOLD_NOT_MET";
-}
-/** A contributed share failed its Feldman check, or the reconstructed key was wrong. */
-export class BadContributionError extends AppError {
-  readonly code = "MPC_BAD_CONTRIBUTION";
-}
-/** The interim reconstruct-to-sign path was used without acknowledgment or in production. */
-export class InterimForbiddenError extends AppError {
-  readonly code = "MPC_INTERIM_FORBIDDEN";
-}
-
-export interface KeyShare {
-  nodeId: number;
-  share: Share;
-  publicKey: Uint8Array;
-  threshold: number;
-  /** Proactive-refresh epoch; shares from different epochs must never be combined. */
-  epoch: number;
-}
-
-/**
- * Dealer ceremony: generate a secp256k1 key and Shamir-split it into `threshold`-
- * of-`n` shares. NOTE: a dealer generates+splits here; production uses a
- * dealerless DKG (each node contributes so no party ever sees the whole key, even
- * at genesis). This is the documented upgrade.
- */
 export function dkg(threshold: number, n: number): { shares: KeyShare[]; publicKey: Uint8Array } {
   const secret = randomScalar();
   const publicKey = secp256k1.getPublicKey(scalarToBytes(secret), true);
@@ -55,13 +25,6 @@ export function dkg(threshold: number, n: number): { shares: KeyShare[]; publicK
   return { shares, publicKey };
 }
 
-/**
- * Proactive refresh (ADR 0007): re-randomize every share WITHOUT changing the key,
- * and bump the epoch. New shares reconstruct the same key; a mix of old-epoch and
- * new-epoch shares does not — so a mobile attacker must compromise `threshold`
- * nodes within a SINGLE epoch. Any Feldman commitments from genesis no longer apply
- * after a refresh; a real deployment reruns VSS to publish fresh commitments.
- */
 export function refreshKeyShares(keyShares: KeyShare[]): KeyShare[] {
   const threshold = keyShares[0]?.threshold ?? keyShares.length;
   const refreshed = refresh(
@@ -75,13 +38,6 @@ export function refreshKeyShares(keyShares: KeyShare[]): KeyShare[] {
   }));
 }
 
-/**
- * One signing node: holds a single key share in its own trust domain and
- * INDEPENDENTLY re-verifies each request before contributing (ADR 0007's second
- * gate — a compromised coordinator cannot extract a contribution without also
- * satisfying the node's own check). `verify` stands in for the per-node
- * authorization-token + policy re-validation.
- */
 export class SignerNode {
   constructor(
     private readonly keyShare: KeyShare,
@@ -106,43 +62,6 @@ export class SignerNode {
   }
 }
 
-export interface ThresholdSignerOptions {
-  /**
-   * Aggregated Feldman commitments (from the dealerless DKG). When present, each
-   * node's contribution is verified against them before combine, so a corrupted or
-   * malicious share is REJECTED with attribution rather than silently producing a
-   * wrong key. Omit only for the dealer ceremony / tests without a VSS transcript.
-   */
-  commitments?: Uint8Array[];
-  /**
-   * Must be `true` to permit the interim reconstruct-to-sign path. Fail-closed: a
-   * caller has to consciously opt into the not-yet-final protocol; forgetting it
-   * throws rather than signing insecurely.
-   */
-  acknowledgeInterim?: boolean;
-  /**
-   * When `true`, the interim path is forbidden OUTRIGHT — reconstruction must never
-   * assemble a mainnet key. Wire this to the real environment flag at the edge so
-   * the interim can never ship to production silently.
-   */
-  production?: boolean;
-}
-
-/**
- * Threshold signer over the `Signer` port (ADR 0007) — drops into the payout
- * broadcaster and pool exactly like KeypairSigner. `t` of `n` nodes cooperate to
- * sign; no single node stores the whole key AT REST, and proactive refresh
- * (refreshKeyShares) forces an attacker to compromise `t` nodes within one epoch.
- *
- * ⚠️ INTERIM — this is not the final protocol. The `combine` step RECONSTRUCTS the
- * key inside the coordinator to sign, so the key is briefly assembled at signing
- * time. That is a real improvement over a single hot key, but it does NOT yet meet
- * ADR 0007's "the key is never assembled." The `contribute → combine` seam is
- * exactly where an AUDITED threshold-ECDSA protocol (CMP) replaces reconstruction
- * with partial signatures. That crypto core must be a vetted implementation before
- * production — never hand-rolled. Until then this class is fail-closed: it refuses
- * to run in production and requires explicit acknowledgment of the interim.
- */
 export class ThresholdSigner implements Signer {
   private readonly commitments: Uint8Array[] | undefined;
 
@@ -168,7 +87,7 @@ export class ThresholdSigner implements Signer {
         "ThresholdSigner uses interim key reconstruction; pass acknowledgeInterim to opt in",
       );
     }
-    // All shares must share one epoch — mixing old + refreshed shares must not reconstruct.
+
     const epochs = new Set(nodes.map((n) => n.epoch));
     if (epochs.size > 1) {
       throw new BadContributionError("nodes span multiple refresh epochs", {
@@ -186,11 +105,9 @@ export class ThresholdSigner implements Signer {
     if (hash.length !== 32) throw new Error("hash must be 32 bytes");
     const ctx: SigningContext = { index, hash };
 
-    // Each node re-verifies independently before releasing its contribution.
     const quorum = this.nodes.slice(0, this.threshold);
     const contributions = quorum.map((node) => node.contribute(ctx));
 
-    // Verify each contribution against the VSS commitments (attributable rejection).
     if (this.commitments) {
       for (const share of contributions) {
         if (!verifyShare(share.x, share.y, this.commitments)) {
@@ -201,20 +118,18 @@ export class ThresholdSigner implements Signer {
       }
     }
 
-    // ── the CMP seam: reconstruct + sign (INTERIM — see class doc) ────────────
     const d = combine(contributions);
-    // Fail closed: never sign unless the reconstructed key IS the group key.
+
     const recoveredPub = secp256k1.getPublicKey(scalarToBytes(d), true);
     if (Buffer.compare(Buffer.from(recoveredPub), Buffer.from(this.publicKey)) !== 0) {
       throw new BadContributionError("reconstructed key does not match the group public key");
     }
     const sig = secp256k1.sign(hash, scalarToBytes(d));
-    // ──────────────────────────────────────────────────────────────────────────
 
     const out = new Uint8Array(65);
     out.set(sig.toCompactRawBytes(), 0);
     out[64] = sig.recovery;
-    // Belt-and-suspenders: the emitted signature must verify under the group key.
+
     if (!secp256k1.verify(out.subarray(0, 64), hash, this.publicKey)) {
       throw new BadContributionError("produced signature does not verify under the group key");
     }
@@ -222,7 +137,6 @@ export class ThresholdSigner implements Signer {
   }
 }
 
-/** Build a ThresholdSigner from a DKG result, one node per share. */
 export function thresholdSignerFromShares(
   shares: KeyShare[],
   publicKey: Uint8Array,

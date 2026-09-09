@@ -8,6 +8,6 @@
   // repo-wide relaxation.
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "exactOptionalPropertyTypes": false },
-  "include": ["src/api/**/*.ts", "types/**/*.ts"],
+  "include": ["src/api/**/*.ts", "src/schemas/http/**/*.ts", "types/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

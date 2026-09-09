@@ -1,6 +1,7 @@
 import { erc20BalanceOfData, erc20TransferData, selector } from "@/chains/evm/abi.js";
 import { deriveEvmAddress, evmAddressFromPubkey, toChecksumAddress } from "@/chains/evm/address.js";
-import { type Eip1559Tx, serializeSigned, signingHash } from "@/chains/evm/evm-tx.js";
+import { serializeSigned, signingHash } from "@/chains/evm/evm-tx.js";
+import type { Eip1559Tx } from "@/types";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { bytesToHex } from "@noble/hashes/utils";
 import { describe, expect, it } from "vitest";
@@ -21,9 +22,9 @@ describe("EIP-55 checksum addresses", () => {
     const xpub =
       "xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKrhko4egpiMZbpiaQL2jkwSB1icqYh2cfDfVxdx4df189oLKnC5fSwqPfgyP3hooxujYzAu3fDVmz";
     const a = deriveEvmAddress(xpub, 0);
-    expect(a).toBe(toChecksumAddress(a)); // already checksummed
+    expect(a).toBe(toChecksumAddress(a));
     expect(a).toMatch(/^0x[0-9a-fA-F]{40}$/);
-    expect(deriveEvmAddress(xpub, 0)).toBe(a); // deterministic
+    expect(deriveEvmAddress(xpub, 0)).toBe(a);
     expect(deriveEvmAddress(xpub, 1)).not.toBe(a);
   });
 });
@@ -39,9 +40,9 @@ describe("ERC20 ABI encoding", () => {
     expect(data.length).toBe(4 + 32 + 32);
     const h = bytesToHex(data);
     expect(h.startsWith("a9059cbb")).toBe(true);
-    // Address right-aligned in the first word.
+
     expect(h.slice(8, 72)).toBe("0000000000000000000000005aaeb6053f3e94c9b9a09f33669435e7ef1beaed");
-    // 1_000_000 = 0xf4240 right-aligned in the second word.
+
     expect(h.slice(72).endsWith("f4240")).toBe(true);
     expect(erc20BalanceOfData("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed").length).toBe(4 + 32);
   });
@@ -66,14 +67,13 @@ describe("EIP-1559 transaction signing", () => {
     const hash = signingHash(tx);
     expect(hash.length).toBe(32);
 
-    // What a Signer returns: 65-byte recoverable r‖s‖v (v = recovery 0/1).
     const sig = secp256k1.sign(hash, priv);
     const sig65 = new Uint8Array(65);
     sig65.set(sig.toCompactRawBytes(), 0);
     sig65[64] = sig.recovery;
 
     const signed = serializeSigned(tx, sig65);
-    expect(signed.raw.startsWith("0x02")).toBe(true); // typed transaction envelope
+    expect(signed.raw.startsWith("0x02")).toBe(true);
     expect(signed.hash).toMatch(/^0x[0-9a-f]{64}$/);
 
     const recovered = secp256k1.Signature.fromCompact(sig65.subarray(0, 64))

@@ -25,8 +25,6 @@ interface ChainsResponse {
 }
 
 function Chrome({ signOut, children }: { signOut: () => void; children: ReactNode }) {
-  // `GET /v1/chains` is the asset registry AND the first authenticated call the
-  // portal makes, so a bad API key surfaces here rather than on some later page.
   const meta = useApi(() => portal.get<ChainsResponse>("/v1/chains"), []);
   if (meta.data) setAssets(meta.data.assets);
 

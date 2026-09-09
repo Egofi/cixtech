@@ -1,14 +1,8 @@
-import {
-  AuthorizationSigner,
-  InvalidAuthorizationError,
-  transferCommitment,
-} from "@/chains/payout/authorization.js";
+import { AuthorizationSigner, transferCommitment } from "@/chains/payout/authorization.js";
 import { AuthorizingBroadcaster } from "@/chains/payout/authorizing-broadcaster.js";
-import type {
-  BroadcastResult,
-  PayoutBroadcaster,
-  PayoutRequest,
-} from "@/chains/payout/broadcaster.js";
+import type { PayoutBroadcaster } from "@/chains/payout/broadcaster.js";
+import { InvalidAuthorizationError } from "@/common";
+import type { BroadcastResult, PayoutRequest } from "@/types";
 import { describe, expect, it } from "vitest";
 
 const claims = {

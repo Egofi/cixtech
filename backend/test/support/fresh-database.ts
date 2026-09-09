@@ -3,24 +3,12 @@ import { type Database, type MigratableSqlClient, openDatabaseUrl } from "@/post
 import type { SqlClient } from "@/types";
 import { TEST_PG_URL_ENV } from "./global-setup.js";
 
-/**
- * An isolated database for one test, backed by a private schema on the shared
- * test server. Schema-per-test rather than database-per-test because `CREATE
- * SCHEMA` costs well under a millisecond while `CREATE DATABASE` copies a
- * template; with hundreds of call sites that difference dominates the suite.
- */
 export interface TestDatabase extends Database {
-  /** The private schema every connection in this handle is bound to. */
   schema: string;
   sql: MigratableSqlClient;
-  /** Run multi-statement DDL in this schema. */
+
   exec(sql: string): Promise<void>;
-  /**
-   * A second handle on the same schema, connected as a role that row-level
-   * security actually applies to — `NOBYPASSRLS`, not the owner. The default
-   * handle is the owner and therefore bypasses RLS, exactly as Neon's
-   * `neondb_owner` does (ADR 0013).
-   */
+
   asAppRole(): Promise<Database>;
 }
 
@@ -36,15 +24,8 @@ function serverUrl(): string {
 
 const schemaName = (): string => `t_${randomUUID().replace(/-/g, "")}`;
 
-/**
- * Every auto-closing handle created since the last sweep. A test that forgets to
- * close would otherwise hold its pool open for the whole run, and Postgres caps
- * concurrent connections — a leak shows up as an unrelated test failing to
- * connect, which is a miserable thing to debug.
- */
 const openHandles = new Set<TestDatabase>();
 
-/** Close every auto-closing handle. Wired into `afterEach` by `setup.ts`. */
 export async function closeOpenDatabases(): Promise<void> {
   const handles = [...openHandles];
   openHandles.clear();
@@ -52,21 +33,11 @@ export async function closeOpenDatabases(): Promise<void> {
 }
 
 export interface FreshDatabaseOptions {
-  /**
-   * Close automatically at the end of the current test (default). Set false for a
-   * handle created in `beforeAll` and shared across a file's tests — it must then
-   * be closed explicitly in `afterAll`.
-   */
   autoClose?: boolean;
-  /** Pool size. Deliberately small: many handles are alive at once across parallel files. */
+
   maxConnections?: number;
 }
 
-/**
- * Create an isolated schema and return a client bound to it. `setupSql` (a
- * package's schema DDL) is applied inside that schema, so unqualified table names
- * in production code resolve there with no changes.
- */
 export async function freshDatabase(
   setupSql?: string,
   options: FreshDatabaseOptions = {},
@@ -74,7 +45,6 @@ export async function freshDatabase(
   const url = serverUrl();
   const schema = schemaName();
 
-  // Create the schema on a connection that is not yet bound to it.
   const bootstrap = openDatabaseUrl(url, {}, { maxConnections: 1 });
   try {
     await bootstrap.sql.exec(`CREATE SCHEMA ${schema};`);
@@ -109,7 +79,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ${schema} TO ${role};
       openHandles.delete(handle);
       for (const h of extra) await h.close().catch(() => {});
       await db.close();
-      // Drop the schema from a fresh connection — the pool above is now closed.
+
       const cleanup = openDatabaseUrl(url, {}, { maxConnections: 1 });
       try {
         await cleanup.sql.exec(`DROP OWNED BY app_${schema};`).catch(() => {});
@@ -124,7 +94,6 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ${schema} TO ${role};
   return handle;
 }
 
-/** Truncate every table in the schema — cheaper than a new schema per property iteration. */
 export async function truncateAll(sql: SqlClient, schema: string): Promise<void> {
   const { rows } = await sql.query<{ tables: string | null }>(
     `SELECT string_agg(quote_ident(tablename), ', ') AS tables

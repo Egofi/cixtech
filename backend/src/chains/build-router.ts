@@ -1,6 +1,7 @@
 import { ChainRegistry } from "@/chain-config";
-import { AppError } from "@/errors";
-import type { SqlClient } from "@/ledger";
+import { ChainMisconfiguredError } from "@/common";
+import type { SkippedChain, SqlClient } from "@/types";
+
 import { HDKey } from "@scure/bip32";
 import { ChainRouter } from "./chain-router.js";
 import { deriveEvmAddress } from "./evm/address.js";
@@ -41,35 +42,6 @@ const NATIVE_SYMBOL: Record<string, string> = {
 
 type Env = Record<string, string | undefined>;
 
-/**
- * A chain was reachable but its token configuration is incomplete — the RPC URL
- * is set, so the operator clearly intends to run this chain, but a token the
- * registry says it carries has no contract address in the environment.
- */
-export class ChainMisconfiguredError extends AppError {
-  readonly code = "CHAIN_MISCONFIGURED";
-}
-
-/** A chain that was NOT registered, and the reason, so boot can say so out loud. */
-export interface SkippedChain {
-  chain: string;
-  reason: string;
-}
-
-/**
- * Resolve every non-native token the registry lists for this chain, or refuse to
- * register the chain at all.
- *
- * This is deliberately fatal rather than best-effort. An unresolved contract
- * makes the balance providers answer `0` for that asset — and `0` is not an
- * error anywhere downstream, it is a number. The gatherer reads it as "this
- * merchant has no funds on chain" and refuses a payout whose money is sitting
- * right there; an operator then goes looking for missing deposits that were
- * never missing. A chain that cannot price its own tokens must not advertise
- * itself as supported.
- *
- * Native gas tokens carry no contract and are skipped.
- */
 function resolveTokenContracts(
   registry: ChainRegistry,
   env: Env,
@@ -97,23 +69,17 @@ function resolveTokenContracts(
 export interface BuiltRouter {
   router: ChainRouter;
   engineXpub: string;
-  /** The chains that were actually wired (had an RPC URL configured). */
+
   chains: string[];
-  /** Chains this build deliberately left out, and why — logged at boot. */
+
   skipped: SkippedChain[];
 }
 
-/**
- * Assemble the ChainRouter from env (ADR 0016). One shared secp256k1 signer
- * controls every chain's addresses (KeypairSigner derives `0/index`, matching
- * deriveTron/EvmAddress). A chain is registered only when its RPC URL is present,
- * so a deployment enables chains by configuration, not code.
- */
 export function buildRouter(env: Env, sql: SqlClient): BuiltRouter {
   const accountXprv = env["CIXTECH_ENGINE_XPRV"];
   if (!accountXprv) throw new Error("CIXTECH_ENGINE_XPRV is required");
 
-  const signer = makeTronSigner(accountXprv); // shared HD signer (signHash is chain-agnostic)
+  const signer = makeTronSigner(accountXprv);
   const engineXpub = HDKey.fromExtendedKey(accountXprv).publicExtendedKey;
   const http = new FetchHttpClient();
   const registry = new ChainRegistry();
@@ -125,7 +91,6 @@ export function buildRouter(env: Env, sql: SqlClient): BuiltRouter {
   const skipped: SkippedChain[] = [];
   const noRpc = (chain: string, envVar: string) => skipped.push({ chain, reason: `no ${envVar}` });
 
-  // ── Tron ────────────────────────────────────────────────────────────────────
   const tronRpc = env["TRON_RPC_URL"];
   if (!tronRpc) noRpc("TRON", "TRON_RPC_URL");
   if (tronRpc) {
@@ -152,7 +117,6 @@ export function buildRouter(env: Env, sql: SqlClient): BuiltRouter {
     });
   }
 
-  // ── EVM family ────────────────────────────────────────────────────────────────
   for (const chain of EVM_CHAINS) {
     const rpcUrl = env[`${chain}_RPC_URL`];
     if (!rpcUrl) {

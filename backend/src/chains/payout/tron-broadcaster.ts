@@ -1,22 +1,13 @@
 import type { Signer } from "@/signing";
+import type { BroadcastResult, PayoutRequest, TronBroadcasterConfig } from "@/types";
 import type { HttpClient } from "../http.js";
 import { abiEncodeTransfer, tronAddressToHex } from "../tron/tron-encoding.js";
 import { verifiedTronSigningHash } from "../tron/tron-tx-verify.js";
-import type { BroadcastResult, PayoutBroadcaster, PayoutRequest } from "./broadcaster.js";
-
-export interface TronBroadcasterConfig {
-  baseUrl: string;
-  apiKey?: string;
-  /** TRC20 token contracts by symbol (e.g. USDT → its Nile/mainnet address, from config). */
-  tokenContracts: Record<string, string>;
-  /** Max SUN to burn for energy on a TRC20 transfer. */
-  feeLimitSun?: number;
-}
+import type { PayoutBroadcaster } from "./broadcaster.js";
 
 interface BuiltTx {
   txID: string;
-  /** The serialized `Transaction.raw` — the bytes txID is the sha256 of, and the
-   * only thing worth verifying, since the JSON `raw_data` is not what gets hashed. */
+
   raw_data_hex?: string;
   [k: string]: unknown;
 }
@@ -31,18 +22,6 @@ interface BroadcastResponse {
   message?: string;
 }
 
-/**
- * Builds, signs, and broadcasts a Tron payout (build spec §16). The node builds
- * the unsigned tx (so we never protobuf-encode), but we do NOT take its word for
- * what it built: `verifiedTronSigningHash` re-derives the hash from the returned
- * body and decodes that body to check the owner, destination, amount and token
- * contract against this request before anything is signed. TRC20 goes through
- * triggersmartcontract, native TRX through createtransaction.
- *
- * Signing the node's `txID` directly — the previous behaviour — meant a hostile
- * or compromised endpoint could return a transfer of the whole balance to its own
- * address and the engine would sign it. See tron-tx-verify.ts.
- */
 export class TronPayoutBroadcaster implements PayoutBroadcaster {
   constructor(
     private readonly http: HttpClient,
@@ -58,9 +37,6 @@ export class TronPayoutBroadcaster implements PayoutBroadcaster {
     const isNative = req.asset === "TRX";
     const tx = isNative ? await this.buildNative(req) : await this.buildTrc20(req);
 
-    // Re-derive the signing hash from the returned body and assert the body is
-    // the transfer this payout authorized. Throws TronTxMismatchError otherwise —
-    // BEFORE the key is asked for a signature.
     const contract = isNative ? undefined : this.config.tokenContracts[req.asset];
     const hash = verifiedTronSigningHash(tx, {
       ownerHex: tronAddressToHex(req.fromAddress),

@@ -1,3 +1,4 @@
+import type { EvmLog } from "@/types";
 import type { HttpClient } from "../http.js";
 
 export const toQuantity = (n: bigint): string => `0x${n.toString(16)}`;
@@ -9,26 +10,11 @@ interface JsonRpcResponse<T> {
   error?: { code: number; message: string };
 }
 
-export interface EvmLog {
-  address: string;
-  topics: string[];
-  data: string;
-  blockNumber: string;
-  transactionHash: string;
-  logIndex: string;
-}
-
 interface BlockHeader {
   number: string;
   baseFeePerGas?: string;
 }
 
-/**
- * A thin, typed Ethereum JSON-RPC client over the shared HttpClient — one code
- * path serves every EVM chain (Polygon, BSC, Arbitrum, Base); only the RPC URL and
- * chainId differ. Encoding/finality live in the adapter and broadcaster; this is
- * pure transport.
- */
 export class EvmRpc {
   private id = 0;
 
@@ -50,7 +36,6 @@ export class EvmRpc {
   }
 
   async nonce(address: string): Promise<bigint> {
-    // "pending" so back-to-back payouts from one address don't collide on nonce.
     return fromQuantity(await this.call<string>("eth_getTransactionCount", [address, "pending"]));
   }
 

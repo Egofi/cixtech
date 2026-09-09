@@ -1,21 +1,13 @@
 import { provisionAppRole } from "@/api/app-role.js";
 import { checkRlsEffective, withTenant } from "@/api/rls.js";
 import { applySchemas } from "@/api/sql.js";
-import { LedgerService, SqlLedgerStore, depositFinalized } from "@/ledger";
+import { depositFinalized } from "@/ledger";
+import { LedgerService } from "@/services";
+import { SqlLedgerStore } from "@/stores";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
 import { type TestDatabase, freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
-/**
- * Database-level guarantees the engine depends on in production, verified against
- * a real PostgreSQL server (`@cixtech/testing`): pooled transaction scoping,
- * savepoint nesting, genuinely concurrent writers, row-level security that
- * actually filters, and the append-only grants on the financial trails.
- *
- * None of this was testable while the suite ran on an in-process single-connection
- * database — it serializes writers and runs as a superuser, so RLS is bypassed and
- * races cannot occur (ADR 0013).
- */
 describe("Postgres guarantees", () => {
   let db: TestDatabase;
 
@@ -42,7 +34,7 @@ describe("Postgres guarantees", () => {
     const id = "atomic-1";
 
     expect((await ledger.post(entryFor(id, 1_000_000n))).applied).toBe(true);
-    expect((await ledger.post(entryFor(id, 1_000_000n))).applied).toBe(false); // idempotent
+    expect((await ledger.post(entryFor(id, 1_000_000n))).applied).toBe(false);
 
     const postings = await db.sql.query<{ n: string }>(
       "SELECT count(*)::text AS n FROM posting WHERE journal_entry_id = $1",
@@ -101,8 +93,6 @@ describe("Postgres guarantees", () => {
       Array.from({ length: N }, (_, i) => ledger.post(entryFor(`conc-${i}`, 1_000_000n))),
     );
 
-    // 1_000_000 at 50bp → 5_000 fee, 995_000 net per deposit. A lost update would
-    // show up as a smaller magnitude. Credit is negative-signed.
     expect(await ledger.getBalance(account, Asset("USDT"))).toBe(BigInt(-995_000 * N));
   });
 
@@ -111,14 +101,13 @@ describe("Postgres guarantees", () => {
     const results = await Promise.all(
       Array.from({ length: 6 }, () => ledger.post(entryFor("race", 1_000_000n))),
     );
-    // Exactly one winner, and no `journal_entry_pkey` violation from the losers:
-    // the insert arbitrates on every unique constraint, not just idempotency_key.
+
     expect(results.filter((r) => r.applied)).toHaveLength(1);
   });
 
   describe("least-privileged application role", () => {
     it("is subject to row-level security, unlike the owner", async () => {
-      expect((await checkRlsEffective(db.sql)).bypasses).toBe(true); // owner bypasses
+      expect((await checkRlsEffective(db.sql)).bypasses).toBe(true);
       const app = await db.asAppRole();
       expect((await checkRlsEffective(app.sql)).bypasses).toBe(false);
     });
@@ -135,7 +124,6 @@ describe("Postgres guarantees", () => {
       );
       expect(seen.rows.map((r) => r.tenant_id)).toEqual(["ta"]);
 
-      // Outside withTenant the GUC is unset, so the cross-tenant admin plane works.
       const all = await app.sql.query<{ tenant_id: string }>("SELECT tenant_id FROM account");
       expect(all.rows.map((r) => r.tenant_id).sort()).toEqual(["ta", "tb"]);
     });
@@ -147,8 +135,6 @@ describe("Postgres guarantees", () => {
       url.username = role;
       url.password = "x";
 
-      // Verify the grants directly rather than reconnecting: the role must hold
-      // SELECT/INSERT but neither UPDATE nor DELETE on each append-only trail.
       for (const table of ["journal_entry", "posting", "admin_audit", "error_log"]) {
         const perms = await db.sql.query<{ privilege_type: string }>(
           `SELECT privilege_type FROM information_schema.table_privileges
@@ -162,7 +148,6 @@ describe("Postgres guarantees", () => {
         expect(granted, `${table} must not be deletable`).not.toContain("DELETE");
       }
 
-      // A mutable operational table keeps full rights, so the revoke is targeted.
       const poolPerms = await db.sql.query<{ privilege_type: string }>(
         `SELECT privilege_type FROM information_schema.table_privileges
           WHERE grantee = $1 AND table_name = 'pool_address' AND table_schema = current_schema()`,
@@ -189,8 +174,7 @@ describe("shared-config rows under tenant isolation (ADR 0011)", () => {
     const seen = await withTenant(app.sql, "ta", (tx) =>
       tx.query<{ tenant: string }>("SELECT tenant FROM gather_config ORDER BY tenant"),
     );
-    // The shared default plus this tenant's own override — never tenant b's.
-    // Hiding the '' row would make a mint fall back to the wrong strategy silently.
+
     expect(seen.rows.map((r) => r.tenant)).toEqual(["", "ta"]);
   });
 });

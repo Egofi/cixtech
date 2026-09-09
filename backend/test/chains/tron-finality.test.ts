@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 const ADDRESS = "TJkyXySVnHjqo6VDoRNxUoCh524ViKuv5h";
 
-/** One raw TRC20 transfer row as TronGrid's /v1 endpoint returns it. */
 function trc20Row(txId: string, value: string) {
   return {
     transaction_id: txId,
@@ -16,12 +15,6 @@ function trc20Row(txId: string, value: string) {
   };
 }
 
-/**
- * Fake HTTP that answers the three endpoints finality needs, by URL:
- *  - GET  /v1/.../transactions/trc20  → the raw deposit list
- *  - POST /walletsolidity/getnowblock → the solidified block number
- *  - POST /wallet/gettransactioninfobyid → the block a given tx landed in
- */
 function fakeHttp(solidified: number, txBlocks: Record<string, number>): HttpClient {
   return {
     async getJson<T>(url: string): Promise<T> {
@@ -48,7 +41,6 @@ describe("Tron finality (solidified-block confirmation)", () => {
   const config = { baseUrl: "https://nile.trongrid.io", confirmations: 19 };
 
   it("credits only deposits in a solidified block; drops not-yet-final ones", async () => {
-    // Solidified frontier at 100; txFinal is at 90 (final), txPending at 110 (not yet).
     const adapter = new TronAdapter(fakeHttp(100, { txFinal: 90, txPending: 110 }), config);
     const confirmed = await adapter.confirmedInboundTrc20(ADDRESS);
     expect(confirmed.map((d) => d.txId)).toEqual(["txFinal"]);
@@ -56,7 +48,7 @@ describe("Tron finality (solidified-block confirmation)", () => {
   });
 
   it("drops a deposit whose tx is not yet mined (no blockNumber)", async () => {
-    const adapter = new TronAdapter(fakeHttp(100, { txFinal: 90 }), config); // txPending unmined
+    const adapter = new TronAdapter(fakeHttp(100, { txFinal: 90 }), config);
     const confirmed = await adapter.confirmedInboundTrc20(ADDRESS);
     expect(confirmed.map((d) => d.txId)).toEqual(["txFinal"]);
   });

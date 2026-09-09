@@ -640,6 +640,64 @@ things most implementations get wrong. It only needs to be switched on.
 
 ---
 
+## Found after this revision
+
+Introduced by the session-management work (`57d0a08`), which landed after the audit
+revision above. Recorded here so the finding list stays the whole story.
+
+### CX-25 — The admin plane's auth hook exempted a route that reads the login log
+
+**Severity:** High · **Status:** proven, fixed
+**Location:** `src/api/admin/admin-routes.ts` (the `onRequest` hook), `GET /admin/api/auth-attempts`
+
+The admin `onRequest` hook decided whether to authenticate by testing the request URL against a
+prefix:
+
+```ts
+if (!req.url.startsWith("/admin/api")) return;
+if (req.url.startsWith("/admin/api/auth")) return;   // meant some /admin/api/auth* surface
+```
+
+No route is registered under `/admin/api/auth`. One route, however, begins with that string:
+`"/admin/api/auth-attempts".startsWith("/admin/api/auth")` is `true`. The hook returned before
+resolving any credential, so no actor was recorded — and the route's own guard,
+
+```ts
+const need = (req, permission) => {
+  const entry = actors.get(req);
+  if (entry?.ctx) requirePermission(entry.ctx, permission);   // no entry -> no check
+};
+```
+
+**failed open** when there was no entry at all. `need(req, "admin.operators.manage")` therefore did
+nothing, and the endpoint answered anyone.
+
+**Proven.** Against the running stack, with no credential of any kind:
+
+```
+GET /admin/api/auth-attempts   -> 200   {"attempts":[...]}
+GET /admin/api/tenants         -> 401   (control)
+```
+
+`listAttempts` returns `at, email, kind, outcome, ip, detail` for every sign-in attempt — a list of
+valid operator and tenant-user email addresses, the addresses they sign in from, and why each attempt
+failed. That is target enumeration for a credential-stuffing run, served without authentication.
+
+**Fix.** Two changes, plus the structural one that makes the class of bug unrepresentable:
+
+1. The dead `/admin/api/auth` exemption is gone.
+2. `need` throws when no actor was recorded, so the guard fails closed.
+3. The hook no longer matches on URL prefixes at all. It looks the route up in the catalogue by its
+   matched Fastify pattern and enforces the permission that catalogue declares — see
+   [ADR 0020](adr/0020-route-catalogue.md).
+
+**Regression test.** `test/api/route-conformance.e2e.test.ts` calls *every* route declared
+`operator`, `tenant` or `admin-token` with no credential and requires a 401 or 403. Re-introducing
+the prefix exemption fails it with `GET /admin/api/auth-attempts -> 200`. The previous test suite
+checked one admin route, which is why this survived.
+
+---
+
 ## Remediation status
 
 All twenty-four findings have been addressed in code. `pnpm test` (118 API + 135

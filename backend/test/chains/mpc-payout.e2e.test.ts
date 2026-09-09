@@ -11,11 +11,6 @@ const DEST = "TTetbYe8bRMfz6ASefJACCb2gSzwbe9AqW";
 const NILE_USDT = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
 const AMOUNT = 1_000_000n;
 
-/**
- * An honest node: it builds the transfer it was asked for, and its txID is the
- * hash of the body it returns. The broadcaster verifies both before signing, so a
- * fake that answered with a bare txID would now (correctly) be refused.
- */
 class FakeHttp implements HttpClient {
   broadcastBody: Record<string, unknown> | undefined;
   rawDataHex = "";
@@ -39,8 +34,6 @@ class FakeHttp implements HttpClient {
 
 describe("MPC ThresholdSigner drives a Tron payout (drop-in Signer)", () => {
   it("signs a payout with 3-of-5 nodes; the broadcast signature recovers to the threshold address", async () => {
-    // The whole point of the Signer port (ADR 0007): swap KeypairSigner → MPC with
-    // zero change to the broadcaster.
     const { shares, publicKey } = dkg(3, 5);
     const signer = thresholdSignerFromShares(shares, publicKey, tronAddressFromPubkey);
     const from = signer.deriveAddress(0);
@@ -62,8 +55,6 @@ describe("MPC ThresholdSigner drives a Tron payout (drop-in Signer)", () => {
     });
     expect(res.txId).toBe(txIdFor(http.rawDataHex));
 
-    // The signature attached to the broadcast was produced by the threshold nodes
-    // and recovers to the threshold public key's Tron address.
     const sigHex = (res && (http.broadcastBody?.["signature"] as string[]))?.[0];
     const sig = Uint8Array.from(Buffer.from(sigHex as string, "hex"));
     const recovered = secp256k1.Signature.fromCompact(sig.subarray(0, 64))

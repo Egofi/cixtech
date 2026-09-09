@@ -1,17 +1,5 @@
 import { createHash } from "node:crypto";
 
-/**
- * Build the transaction bodies a real Tron node returns, so tests exercise the
- * broadcaster's verification path instead of walking around it.
- *
- * Since `TronPayoutBroadcaster` re-derives the signing hash from `raw_data_hex`
- * and decodes it to check owner / destination / amount / contract, a fake node
- * that answers with a bare `txID` is no longer a usable stand-in — it is exactly
- * the malformed response the broadcaster must refuse. These helpers encode real
- * protobuf so a fake node can be honest, and so a test that WANTS to be dishonest
- * has to say so explicitly.
- */
-
 const varint = (n: bigint): Uint8Array => {
   const out: number[] = [];
   let v = n;
@@ -30,13 +18,11 @@ const lenField = (no: number, payload: Uint8Array) =>
 const varField = (no: number, value: bigint) => cat(tag(no, 0), varint(value));
 const bytesOf = (hex: string) => Uint8Array.from(Buffer.from(hex.replace(/^0x/, ""), "hex"));
 
-/** ERC20/TRC20 `transfer(address,uint256)` calldata for a 0x41-prefixed Tron address. */
 export const trc20Calldata = (toHex21: string, amount: bigint): string =>
   `a9059cbb${toHex21.replace(/^0x/, "").slice(2).padStart(64, "0")}${amount
     .toString(16)
     .padStart(64, "0")}`;
 
-/** `Transaction.raw` carrying one TriggerSmartContract — a TRC20 transfer. */
 export function trc20RawData(
   ownerHex: string,
   contractHex: string,
@@ -58,7 +44,6 @@ export function trc20RawData(
   ).toString("hex");
 }
 
-/** `Transaction.raw` carrying one TransferContract — a native TRX transfer. */
 export function trxRawData(ownerHex: string, toHex: string, amount: bigint): string {
   const transfer = cat(
     lenField(1, bytesOf(ownerHex)),
@@ -74,9 +59,7 @@ export function trxRawData(ownerHex: string, toHex: string, amount: bigint): str
   ).toString("hex");
 }
 
-/** The txID a node computes for a body: sha256 of the serialized raw_data. */
 export const txIdFor = (rawHex: string): string =>
   createHash("sha256").update(Buffer.from(rawHex, "hex")).digest("hex");
 
-/** A complete, self-consistent `transaction` object as the node would return it. */
 export const builtTx = (rawHex: string) => ({ txID: txIdFor(rawHex), raw_data_hex: rawHex });

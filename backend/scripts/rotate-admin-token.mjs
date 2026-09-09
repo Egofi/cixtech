@@ -11,7 +11,6 @@ const filesToUpdate = [
   resolve(repoRoot, "docker.env"),
 ];
 
-// Generate a 24-byte secure hex token prefixed with cixadmin_
 const newToken = `cixadmin_${randomBytes(24).toString("hex")}`;
 
 console.log("\n=======================================================");

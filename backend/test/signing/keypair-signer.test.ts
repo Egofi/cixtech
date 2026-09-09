@@ -18,8 +18,6 @@ describe("KeypairSigner", () => {
       const sig = signer.signHash(index, hash);
       expect(sig).toHaveLength(65);
 
-      // Recover the signer's public key from the signature and confirm it is the
-      // key behind the derived address — i.e. the signer really controls it.
       const recovered = secp256k1.Signature.fromCompact(sig.subarray(0, 64))
         .addRecoveryBit(sig[64] as number)
         .recoverPublicKey(hash)

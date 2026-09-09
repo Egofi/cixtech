@@ -22,8 +22,10 @@
     "verify:chains": "node scripts/verify-chain-config.mjs",
     "generate-test-key": "node scripts/generate-test-key.mjs",
     "rotate-admin-token": "node scripts/rotate-admin-token.mjs",
-    "check": "pnpm typecheck && pnpm lint:ci && pnpm guard:constants && pnpm test",
-    "create-operator": "node scripts/create-operator.mjs"
+    "check": "pnpm db:types:check && pnpm typecheck && pnpm lint:ci && pnpm guard:constants && pnpm test",
+    "create-operator": "node scripts/create-operator.mjs",
+    "db:types": "node scripts/generate-db-types.mjs",
+    "db:types:check": "node scripts/generate-db-types.mjs --check"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
@@ -38,6 +40,7 @@
     "bullmq": "^5.34.0",
     "fastify": "^5.12.3",
     "ioredis": "^5.6.1",
+    "kysely": "^0.29.5",
     "pg": "^8.22.0",
     "prom-client": "^15",
     "zod": "^4.4.3"

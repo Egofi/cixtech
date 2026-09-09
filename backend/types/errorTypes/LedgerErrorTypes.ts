@@ -1,0 +1,9 @@
+export const LEDGER_ERROR_CODES = [
+  "LEDGER_INSUFFICIENT_FUNDS",
+  "LEDGER_UNKNOWN_ENTRY",
+  "LEDGER_UNBALANCED_ENTRY",
+  "LEDGER_INVALID_POSTING",
+  "LEDGER_DUPLICATE_ENTRY_ID",
+] as const;
+
+export type LedgerErrorCode = (typeof LEDGER_ERROR_CODES)[number];

@@ -1,5 +1,5 @@
-import { redactDatabaseUrl, resolveDatabaseUrls } from "@/api/db.js";
 import { SCHEMA_MODULES, applySchemas, assertSchemaReady } from "@/api/sql.js";
+import { redactDatabaseUrl, resolveDatabaseUrls } from "@/postgres";
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
 
@@ -31,7 +31,7 @@ describe("database URL resolution (ADR 0013)", () => {
     const shown = redactDatabaseUrl(NEON);
     expect(shown).not.toContain("s3cr3t");
     expect(shown).toBe("postgresql://user@ep-x-pooler.us-east-2.aws.neon.tech/neondb");
-    // A malformed string must not fall through to printing itself.
+
     expect(redactDatabaseUrl("not a url:s3cr3t")).not.toContain("s3cr3t");
   });
 });
@@ -51,12 +51,12 @@ describe("schema migration bookkeeping", () => {
   it("reports a module whose SQL changed after it was applied, rather than calling it up to date", async () => {
     const sql = (await freshDatabase()).sql;
     await applySchemas(sql);
-    // Simulate the code's SQL having moved on from what this database received.
+
     await sql.query("UPDATE schema_migration SET checksum = 'stale' WHERE name = 'ledger'");
 
     const applied = await applySchemas(sql);
     expect(applied.find((m) => m.name === "ledger")?.status).toBe("changed");
-    // Everything else is untouched — drift is reported per module, not globally.
+
     expect(applied.filter((m) => m.status === "changed")).toHaveLength(1);
   });
 });

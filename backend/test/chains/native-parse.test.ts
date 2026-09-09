@@ -2,9 +2,6 @@ import { tronAddressFromHex } from "@/chains/tron/address.js";
 import { parseNativeTransfers } from "@/chains/tron/native.js";
 import { describe, expect, it } from "vitest";
 
-// Shape + values taken from the real Nile faucet funding tx of
-// TJkyXySVnHjqo6VDoRNxUoCh524ViKuv5h (2000 TRX). The `to_address` hex is a real
-// hex→base58 vector: it must decode back to that address.
 const FAUCET_TX = {
   data: [
     {

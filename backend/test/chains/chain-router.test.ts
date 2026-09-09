@@ -1,11 +1,10 @@
 import type { AddressBalance } from "@/attribution";
-import type { ChainDeposit, DepositSource } from "@/chains/chain-adapter.js";
-import { type ChainPlugin, ChainRouter, UnsupportedChainError } from "@/chains/chain-router.js";
-import type {
-  BroadcastResult,
-  PayoutBroadcaster,
-  PayoutRequest,
-} from "@/chains/payout/broadcaster.js";
+import type { DepositSource } from "@/chains/chain-adapter.js";
+import type { ChainPlugin } from "@/chains/chain-router.js";
+import { ChainRouter } from "@/chains/chain-router.js";
+import type { PayoutBroadcaster } from "@/chains/payout/broadcaster.js";
+import { UnsupportedChainError } from "@/common";
+import type { BroadcastResult, ChainDeposit, PayoutRequest } from "@/types";
 import { describe, expect, it } from "vitest";
 
 function plugin(chain: string): ChainPlugin & { sent: PayoutRequest[] } {

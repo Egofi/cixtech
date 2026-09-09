@@ -3,14 +3,9 @@ import { TronPayoutBroadcaster } from "@/chains/payout/tron-broadcaster.js";
 import { RawTronSigner } from "@/chains/tron/raw-tron-signer.js";
 import { describe, expect, it } from "vitest";
 
-// Gated on CIXTECH_LIVE_PAYOUT + TRON_PK. Broadcasts a REAL Tron transaction on
-// Nile, signed by the engine's key — the live money-out counterpart to the live
-// money-in. Destination + amount come from env (default: a self-transfer of 1
-// USDT). The key is read from the env only, never stored.
 const PK = process.env["TRON_PK"];
 const RUN = process.env["CIXTECH_LIVE_PAYOUT"] && PK;
 
-// Nile testnet USDT-TRC20 contract.
 const NILE_USDT = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
 
 describe.skipIf(!RUN)("LIVE Nile payout (gated on CIXTECH_LIVE_PAYOUT)", () => {

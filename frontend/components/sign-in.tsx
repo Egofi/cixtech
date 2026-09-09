@@ -9,14 +9,6 @@ type Stage =
   | { step: "enrol"; challenge: string; secret: string; uri: string }
   | { step: "recovery"; codes: string[]; principal: Me };
 
-/**
- * Sign-in for both consoles.
- *
- * Three stages, because a password alone is not a session for a role that can
- * move value: credentials → second factor → (first time) recovery codes. The
- * enrolment stage is not skippable — the API returns the challenge rather than a
- * cookie, so there is nothing to skip to.
- */
 export function SignIn({
   kind,
   title,

@@ -1,5 +1,6 @@
-import { MemoryLedgerStore } from "@/ledger/adapters/memory-store.js";
-import { LedgerService } from "@/ledger/ledger.service.js";
+import { LedgerService } from "@/services";
+import { MemoryLedgerStore } from "@/stores";
+
 import { depositFinalized, reverse } from "@/ledger/posting-flows.js";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
 import fc from "fast-check";
@@ -12,7 +13,6 @@ const FEE = LedgerAccountKey("egofi_fee_revenue:t1");
 const USDT = Asset("USDT");
 
 describe("idempotency & reorg", () => {
-  // Property 4 — replaying an idempotency key is a no-op; no double-credit.
   it("[4] re-posting the same idempotencyKey changes nothing", async () => {
     await fc.assert(
       fc.asyncProperty(balancedEntry(), async (entry) => {
@@ -29,8 +29,6 @@ describe("idempotency & reorg", () => {
     );
   });
 
-  // Property 5 — apply(deposit) then reverse(deposit) restores every balance exactly.
-  // This is entry-level reorg safety: a finalized deposit reorged out leaves no trace.
   it("[5] a deposit followed by its reversal nets to the pre-deposit state", async () => {
     await fc.assert(
       fc.asyncProperty(
@@ -53,19 +51,15 @@ describe("idempotency & reorg", () => {
             feeRevenue: FEE,
           });
           await svc.post(deposit);
-          // The deposit genuinely moved value before we undo it (not a no-op).
+
           expect(await store.balance(POOL, USDT)).toBe(amount);
 
-          // A reversal must carry a DISTINCT idempotency key, or the store dedupes it.
           await svc.post(reverse(deposit, JournalEntryId("rev"), IdempotencyKey("rev")));
 
           const after = await Promise.all(accounts.map((a) => store.balance(a, USDT)));
-          expect(after).toEqual(before); // every touched balance back to exactly where it started
+          expect(after).toEqual(before);
         },
       ),
     );
   });
-
-  // Property 6 (detect / finalize / reverse keep solvency) lives in solvency.property.test.ts,
-  // since it asserts the solvency invariant rather than balance restoration.
 });

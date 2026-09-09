@@ -1,11 +1,12 @@
-import type { Allowlist, PayoutContext, SolvencyOracle } from "@/chains/payout/policy.js";
+import { PolicyEngine } from "@/chains/payout/policy.js";
+import type { Allowlist, SolvencyOracle } from "@/chains/payout/policy.js";
 import {
   ApprovalRequiredError,
   ComplianceHoldError,
   PolicyDeniedError,
-  PolicyEngine,
   TimeLockedError,
-} from "@/chains/payout/policy.js";
+} from "@/common";
+import type { PayoutContext } from "@/types";
 import { describe, expect, it } from "vitest";
 
 const DEST = "TDestination0000000000000000000000";

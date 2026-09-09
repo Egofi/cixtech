@@ -44,7 +44,6 @@ async function main() {
       console.log(`  ✓ Inserted key into ${hostLabel}`);
       successCount++;
     } catch (err) {
-      // Ignore connection failures for inactive databases
     } finally {
       await pool.end().catch(() => {});
     }

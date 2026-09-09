@@ -1,24 +1,18 @@
 import { FetchHttpClient } from "@/chains/http.js";
-import { PayoutService } from "@/chains/payout/payout-service.js";
+import { LEDGER_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService, PayoutService } from "@/services";
+import { SqlLedgerStore } from "@/stores";
+
 import { PolicyEngine } from "@/chains/payout/policy.js";
 import { TronPayoutBroadcaster } from "@/chains/payout/tron-broadcaster.js";
 import { RawTronSigner } from "@/chains/tron/raw-tron-signer.js";
-import {
-  LEDGER_SCHEMA_SQL,
-  LedgerService,
-  SqlLedgerStore,
-  depositFinalized,
-  splitFee,
-} from "@/ledger";
-import type { SqlClient } from "@/ledger";
-import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
+import { depositFinalized, splitFee } from "@/ledger";
+
+import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey, type SqlClient } from "@/types";
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
 import { fundedGatherer } from "./pool-fixture.js";
 
-// The full guarded payout, LIVE: policy → ledger lock → REAL broadcast on Nile →
-// ledger settle, as one PayoutService.payout() call. Ledger and chain move
-// together. Gated on CIXTECH_LIVE_GUARDED + TRON_PK.
 const PK = process.env["TRON_PK"];
 const RUN = process.env["CIXTECH_LIVE_GUARDED"] && PK;
 const DEST = process.env["CIXTECH_PAYOUT_TO"] ?? "TTetbYe8bRMfz6ASefJACCb2gSzwbe9AqW";
@@ -35,7 +29,7 @@ describe.skipIf(!RUN)("LIVE guarded payout (gated on CIXTECH_LIVE_GUARDED)", () 
     await db.exec(LEDGER_SCHEMA_SQL);
     const sql = db.sql;
     const ledger = new LedgerService(new SqlLedgerStore(sql));
-    // Seed the merchant with a deposit so there is a balance to pay out.
+
     await ledger.post(
       depositFinalized({
         id: JournalEntryId("dep"),
@@ -50,7 +44,7 @@ describe.skipIf(!RUN)("LIVE guarded payout (gated on CIXTECH_LIVE_GUARDED)", () 
     );
 
     const signer = new RawTronSigner(PK as string);
-    // Pool holds the hot-key's address; the gatherer selects it as the source.
+
     const gatherer = await fundedGatherer(db, sql, {
       tenant: "t1",
       merchant: "m1",

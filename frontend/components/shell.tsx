@@ -11,14 +11,6 @@ export interface NavItem {
   icon: string;
 }
 
-/**
- * The console frame: brand, navigation, sign-out, and the current page.
- *
- * Navigation is real routing rather than the previous `views[name]()` dispatch,
- * so every view now has a URL. That is not cosmetic — an operator can link a
- * colleague straight to the audit trail during an incident, and the back button
- * does what it should.
- */
 export function Shell({
   brand,
   env,
@@ -33,7 +25,7 @@ export function Shell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
-  // Trailing slashes are on (see next.config.mjs), so compare normalised paths.
+
   const norm = (p: string) => (p.endsWith("/") ? p : `${p}/`);
   const here = norm(pathname);
 

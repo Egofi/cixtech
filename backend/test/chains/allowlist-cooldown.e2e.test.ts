@@ -1,6 +1,7 @@
-import { POLICY_SCHEMA_SQL, SqlAllowlist } from "@/chains/payout/policy-store.js";
-import type { PayoutContext } from "@/chains/payout/policy.js";
-import type { SqlClient } from "@/ledger";
+import { POLICY_SCHEMA_SQL } from "@/schemas/sql";
+import { SqlAllowlist } from "@/stores";
+import type { PayoutContext, SqlClient } from "@/types";
+
 import { freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -26,13 +27,12 @@ describe("SqlAllowlist — cool-down (§7.2)", () => {
   it("an added destination is NOT usable until its cool-down elapses", async () => {
     const list = new SqlAllowlist(sql);
     const now = new Date("2026-01-01T00:00:00Z");
-    await list.add("t1", "m1", "TRON", DEST, 60 * 60_000, now); // 1h cool-down
+    await list.add("t1", "m1", "TRON", DEST, 60 * 60_000, now);
 
-    // Same session: still cooling → not usable (defeats add-and-drain).
     expect(await list.usable(ctx(), now)).toBe(false);
-    // 59 min later: still cooling.
+
     expect(await list.usable(ctx(), new Date(now.getTime() + 59 * 60_000))).toBe(false);
-    // 61 min later: usable.
+
     expect(await list.usable(ctx(), new Date(now.getTime() + 61 * 60_000))).toBe(true);
   });
 

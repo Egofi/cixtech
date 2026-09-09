@@ -1,12 +1,20 @@
 import {
   ExternalReconciler,
   type IndependentBalanceSource,
-  type PoolGroup,
   type ReconcilerBreaker,
 } from "@/chains/reconcile/external-reconciler.js";
-import { GasStation, type GasStationConfig } from "@/chains/treasury/gas-station.js";
-import { LedgerService, MemoryLedgerStore, depositFinalized } from "@/ledger";
-import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
+import { GasStation } from "@/chains/treasury/gas-station.js";
+import { depositFinalized } from "@/ledger";
+import { LedgerService } from "@/services";
+import { MemoryLedgerStore } from "@/stores";
+import {
+  Asset,
+  type GasStationConfig,
+  IdempotencyKey,
+  JournalEntryId,
+  LedgerAccountKey,
+  type PoolGroup,
+} from "@/types";
 import { describe, expect, it } from "vitest";
 
 const USDT = "USDT";
@@ -39,10 +47,10 @@ class RecordingBreaker implements ReconcilerBreaker {
 
 describe("ExternalReconciler (§8, independent source)", () => {
   it("reports no drift and does not trip when ledger == independent chain sum", async () => {
-    const ledger = await seededLedger(1_000n); // pool_addr:TRON:m1 == 1000
+    const ledger = await seededLedger(1_000n);
     const independent: IndependentBalanceSource = {
       async balance(_c, addr) {
-        return addr === "A" ? 600n : 400n; // sums to 1000
+        return addr === "A" ? 600n : 400n;
       },
     };
     const breaker = new RecordingBreaker();
@@ -67,7 +75,7 @@ describe("ExternalReconciler (§8, independent source)", () => {
     const ledger = await seededLedger(1_000n);
     const independent: IndependentBalanceSource = {
       async balance() {
-        return 300n; // 300 + 300 = 600 ≠ ledger 1000
+        return 300n;
       },
     };
     const breaker = new RecordingBreaker();

@@ -1,5 +1,11 @@
-import type { JournalEntry, Posting } from "@/ledger/entry.js";
-import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
+import {
+  Asset,
+  IdempotencyKey,
+  type JournalEntry,
+  JournalEntryId,
+  LedgerAccountKey,
+  type Posting,
+} from "@/types";
 import fc from "fast-check";
 
 const ACCOUNTS = [
@@ -16,11 +22,6 @@ export const account = () => fc.constantFrom(...ACCOUNTS).map((s) => LedgerAccou
 export const asset = () => fc.constantFrom(...ASSETS).map((s) => Asset(s));
 export const amount = () => fc.bigInt({ min: 1n, max: 10n ** 18n });
 
-/**
- * A minimal balanced entry: one asset, an equal DEBIT and CREDIT across two
- * distinct accounts. Balanced by construction — the property suites then assert
- * the ledger preserves that.
- */
 export const balancedEntry = (): fc.Arbitrary<JournalEntry> =>
   fc
     .tuple(
@@ -46,7 +47,6 @@ export const balancedEntry = (): fc.Arbitrary<JournalEntry> =>
       };
     });
 
-/** Same as balancedEntry but the CREDIT leg is perturbed so it no longer nets to zero. */
 export const unbalancedEntry = (): fc.Arbitrary<JournalEntry> =>
   balancedEntry().map((e) => {
     const last = e.postings.length - 1;

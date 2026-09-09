@@ -4,25 +4,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import EmbeddedPostgres from "embedded-postgres";
 
-/**
- * A real PostgreSQL server for the test suite.
- *
- * Why not PGlite: it is Postgres compiled to WASM, single-connection, and running
- * as a superuser — so it can prove SQL correctness but cannot prove any of the
- * things this codebase actually depends on in production. Connection-pool
- * transaction scoping, savepoint nesting, genuine concurrent writers, and
- * row-level security all behave differently or not at all there (a superuser
- * bypasses RLS entirely, which is exactly the trap ADR 0013 documents).
- *
- * Why not testcontainers: it needs Docker, so a run leaves containers and volumes
- * outside this repository — and on a machine where the daemon refuses `stop`,
- * leaves them permanently. `embedded-postgres` runs a real Postgres binary as a
- * child process of the test run, listening on loopback, with its data directory
- * under `.test-postgres/` in this repo. Everything it creates lives inside the
- * project and is removed when the run ends.
- */
-
-/** Repo-local root for test clusters, so nothing is written outside the project. */
 const DATA_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../.test-postgres");
 
 const PORT_SEARCH_START = 55_432;
@@ -38,12 +19,6 @@ async function isPortFree(port: number): Promise<boolean> {
   });
 }
 
-/**
- * Probing a port and then binding it is inherently racy, and turbo runs several
- * packages' suites at once — each starting its own server. So the search starts
- * at a random offset to make collisions unlikely, and `startEmbeddedPostgres`
- * retries on a different port when one happens anyway.
- */
 async function findFreePort(): Promise<number> {
   const offset = Math.floor(Math.random() * PORT_SEARCH_RANGE);
   for (let i = 0; i < PORT_SEARCH_RANGE; i++) {
@@ -54,7 +29,6 @@ async function findFreePort(): Promise<number> {
 }
 
 export interface EmbeddedHandle {
-  /** Connection string for the superuser/owner role. */
   url: string;
   port: number;
   stop(): Promise<void>;
@@ -64,11 +38,6 @@ const USER = "cixtech_test";
 const PASSWORD = "cixtech_test";
 const DATABASE = "postgres";
 
-/**
- * Start a throwaway Postgres. The data directory is a fresh temp dir that is
- * removed on stop, so a run leaves nothing behind — no containers, no volumes,
- * nothing written into the repository.
- */
 export async function startEmbeddedPostgres(): Promise<EmbeddedHandle> {
   let lastError: unknown;
   for (let attempt = 0; attempt < START_ATTEMPTS; attempt++) {
@@ -95,7 +64,7 @@ async function startOnce(): Promise<EmbeddedHandle> {
     password: PASSWORD,
     port,
     persistent: false,
-    // initdb/postgres chatter would drown the test reporter.
+
     onLog: () => {},
     onError: () => {},
   });
@@ -117,7 +86,6 @@ async function startOnce(): Promise<EmbeddedHandle> {
     rmSync(dataDir, { recursive: true, force: true });
   };
 
-  // A crashed or interrupted run must not leave a postgres process behind.
   const onExit = () => {
     void stop();
   };

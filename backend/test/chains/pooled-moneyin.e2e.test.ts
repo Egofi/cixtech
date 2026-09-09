@@ -1,16 +1,13 @@
-import {
-  POOL_SCHEMA_SQL,
-  PoolManager,
-  PoolState,
-  PooledAttribution,
-  SqlPoolStore,
-} from "@/attribution";
-import type { ChainDeposit } from "@/chains/chain-adapter.js";
+import { PoolManager, PoolState, PooledAttribution } from "@/attribution";
+
 import { DepositIngestor } from "@/chains/ingest/deposit-ingestor.js";
 import { deriveTronAddress } from "@/chains/tron/address.js";
-import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore, splitFee } from "@/ledger";
-import type { SqlClient } from "@/ledger";
-import { Asset, LedgerAccountKey } from "@/types";
+import { splitFee } from "@/ledger";
+import { LEDGER_SCHEMA_SQL, POOL_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService } from "@/services";
+import { SqlLedgerStore, SqlPoolStore } from "@/stores";
+
+import { Asset, type ChainDeposit, LedgerAccountKey, type SqlClient } from "@/types";
 import { HDKey } from "@scure/bip32";
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
@@ -50,7 +47,7 @@ describe("pooled-address money-in (real Tron derivation)", () => {
   it("assigns a real derived address, credits a deposit to it, and starts its cool-off", async () => {
     const { ledger, pool, store, ingestor } = await setup();
     const addr = await pool.assign("t1", "m1", "TRON", "inv-1", XPUB);
-    expect(addr.startsWith("T")).toBe(true); // a real base58 Tron address
+    expect(addr.startsWith("T")).toBe(true);
 
     expect((await ingestor.ingestConfirmed(deposit(addr, "tx1", "1000000"))).status).toBe(
       "credited",
@@ -59,8 +56,7 @@ describe("pooled-address money-in (real Tron derivation)", () => {
     const { net, fee } = splitFee(1_000_000n, 50);
     expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(net);
     expect(await ledger.availableBalance(FEE, USDT)).toBe(fee);
-    // Crediting happens at finality, which is exactly when cool-off starts (ADR
-    // 0009) — the address is COOLING, not parked in IN_USE forever.
+
     const credited = await store.findByAddress("TRON", addr);
     expect(credited?.state).toBe(PoolState.Cooling);
     expect(credited?.cooldownUntil).toBeInstanceOf(Date);
@@ -80,6 +76,6 @@ describe("pooled-address money-in (real Tron derivation)", () => {
     await pool.releaseCooled(new Date(Date.now() + 120_000));
 
     const second = await pool.assign("t1", "m1", "TRON", "inv-2", XPUB);
-    expect(second).toBe(first); // one address, reused — bounded fragmentation (ADR 0009)
+    expect(second).toBe(first);
   });
 });

@@ -1,9 +1,9 @@
-import type { ChainAdapter, ChainDeposit, ChainFamily, FinalityRule } from "../chain-adapter.js";
+import type { ChainDeposit, ChainFamily, EvmAdapterConfig, EvmLog, FinalityRule } from "@/types";
+import type { ChainAdapter } from "../chain-adapter.js";
 import { TRANSFER_EVENT_TOPIC } from "./abi.js";
 import { toChecksumAddress } from "./address.js";
-import { type EvmLog, type EvmRpc, fromQuantity, toQuantity } from "./evm-rpc.js";
+import { type EvmRpc, fromQuantity, toQuantity } from "./evm-rpc.js";
 
-/** A 32-byte log topic for a 20-byte address (right-aligned, lower-case). */
 export function addressTopic(address: string): string {
   const clean = address.toLowerCase().replace(/^0x/, "");
   return `0x${"0".repeat(24)}${clean}`;
@@ -11,20 +11,6 @@ export function addressTopic(address: string): string {
 
 const addressFromTopic = (topic: string): string => toChecksumAddress(`0x${topic.slice(-40)}`);
 
-export interface EvmAdapterConfig {
-  chain: string;
-  confirmations: number;
-  /** ERC20 contracts by symbol on this chain (symbol → contract). */
-  tokenContracts: Record<string, string>;
-}
-
-/**
- * The EVM deposit adapter (ChainAdapter): one implementation for every EVM chain.
- * Detection is ERC20 `Transfer` logs to a watched address, credited only once the
- * block is buried under `confirmations` (§9). Native-gas deposit detection needs
- * block/trace scanning and is a follow-up; the balance provider already reads
- * native balances for gathering.
- */
 export class EvmAdapter implements ChainAdapter {
   readonly family: ChainFamily = "EVM";
   private readonly symbolByContract: Map<string, string>;
@@ -50,7 +36,6 @@ export class EvmAdapter implements ChainAdapter {
     return { confirmations: this.config.confirmations };
   }
 
-  /** Parse raw `Transfer` logs into deposits, dropping any token we do not track. */
   parseDeposits(raw: unknown): ChainDeposit[] {
     const logs = raw as EvmLog[];
     const out: ChainDeposit[] = [];
@@ -59,7 +44,7 @@ export class EvmAdapter implements ChainAdapter {
         continue;
       }
       const symbol = this.symbolByContract.get(log.address.toLowerCase());
-      if (!symbol) continue; // a transfer of some token we do not custody
+      if (!symbol) continue;
       out.push({
         chain: this.config.chain,
         txId: log.transactionHash,
@@ -75,14 +60,6 @@ export class EvmAdapter implements ChainAdapter {
     return out;
   }
 
-  /**
-   * Scan inbound ERC20 deposits to `address` over `[fromBlock, head - confirmations]`
-   * — only FINAL blocks, so a reorg-able transfer is never credited. Returns the
-   * highest block scanned (`scannedTo`) so a durable cursor can advance past it;
-   * when nothing is final yet, `scannedTo < fromBlock` and the cursor holds. One
-   * query covers every tracked token (filtered by the `to` topic, mapped back to
-   * a symbol).
-   */
   async scanInboundErc20(
     address: string,
     fromBlock: bigint,
@@ -98,7 +75,6 @@ export class EvmAdapter implements ChainAdapter {
     return { deposits: this.parseDeposits(logs), scannedTo: safe };
   }
 
-  /** The finalized inbound ERC20 deposits to `address` from `fromBlock` onward. */
   async confirmedInboundErc20(address: string, fromBlock: bigint): Promise<ChainDeposit[]> {
     return (await this.scanInboundErc20(address, fromBlock)).deposits;
   }

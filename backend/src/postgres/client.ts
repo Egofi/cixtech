@@ -1,26 +1,10 @@
 import type { SqlClient } from "@/types";
 import type pg from "pg";
 
-/**
- * A `SqlClient` that can also run multi-statement DDL. Schema application needs
- * the simple-query protocol (many statements, no parameters), which the
- * parameterized `query` path deliberately does not expose.
- */
 export interface MigratableSqlClient extends SqlClient {
   exec(sql: string): Promise<void>;
 }
 
-/**
- * Wrap a `pg.Pool` as the shared `SqlClient` (ADR 0013 — the port that keeps the
- * ledger host swappable).
- *
- * `transaction` checks out ONE connection and runs the whole unit of work on it,
- * which is what makes `SqlLedgerStore.append` atomic on a pooled database: without
- * it, each statement could land on a different backend and the entry/postings/
- * balance writes would not share a transaction. A nested `transaction` becomes a
- * SAVEPOINT rather than a second `BEGIN` (which Postgres would warn about and
- * whose COMMIT would wrongly commit the outer transaction).
- */
 export function pgClient(pool: pg.Pool): MigratableSqlClient {
   const onClient = (client: pg.PoolClient, depth: number): SqlClient => ({
     async query<R>(text: string, params?: readonly unknown[]) {
@@ -61,8 +45,6 @@ export function pgClient(pool: pg.Pool): MigratableSqlClient {
       }
     },
     async exec(sql: string) {
-      // No parameters → simple-query protocol, which accepts multiple statements
-      // in one round trip. This is the DDL path; never used for tenant data.
       await pool.query(sql);
     },
   };

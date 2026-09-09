@@ -18,6 +18,11 @@ rise to cixtech and supersedes egofi's ADR 0001.
 - **0015** — super-admin console
 - **0016** — multi-chain engine
 - **0017** — engine scope boundary (no merchant/checkout/fiat layer here)
+- **0018** — human sessions, separate from machine credentials
+- **0019** — one error catalogue, one entrance
+- **0020** — one routes folder, and access declared with the path
+- **0021** — layer folders for services, stores and schemas
+- **0022** — Kysely over the SqlClient port, and why not Prisma
 
 The build spec (`../CUSTODY_ENGINE_BUILD_SPEC.md`) and the step-1 ledger plan
 (`../CIXTECH_STEP1_LEDGER_CORE.md`) sit alongside this directory.

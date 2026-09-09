@@ -1,20 +1,21 @@
-import type {
-  BroadcastResult,
-  PayoutBroadcaster,
-  PayoutRequest,
-} from "@/chains/payout/broadcaster.js";
-import { PayoutService } from "@/chains/payout/payout-service.js";
-import { PolicyDeniedError, PolicyEngine } from "@/chains/payout/policy.js";
+import type { PayoutBroadcaster } from "@/chains/payout/broadcaster.js";
+import { LEDGER_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService, PayoutService } from "@/services";
+import { SqlLedgerStore } from "@/stores";
+
+import { PolicyEngine } from "@/chains/payout/policy.js";
+import { InsufficientFundsError, PolicyDeniedError } from "@/common";
+import { depositFinalized, splitFee } from "@/ledger";
+
 import {
-  LEDGER_SCHEMA_SQL,
-  LedgerService,
-  SqlLedgerStore,
-  depositFinalized,
-  splitFee,
-} from "@/ledger";
-import type { SqlClient } from "@/ledger";
-import { InsufficientFundsError } from "@/ledger";
-import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
+  Asset,
+  type BroadcastResult,
+  IdempotencyKey,
+  JournalEntryId,
+  LedgerAccountKey,
+  type PayoutRequest,
+  type SqlClient,
+} from "@/types";
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
 import { fundedGatherer } from "./pool-fixture.js";
@@ -26,7 +27,6 @@ const POOL = LedgerAccountKey("pool_addr:TRON:m1");
 const DEST = "TDestination0000000000000000000000";
 const FROM = "TPool00000000000000000000000000000";
 
-/** Fake broadcaster: records the request and returns a txId — no network, no funded key. */
 class FakeBroadcaster implements PayoutBroadcaster {
   sent: PayoutRequest[] = [];
   async send(req: PayoutRequest): Promise<BroadcastResult> {
@@ -80,7 +80,7 @@ const params = (amount: bigint, over = {}) => ({
 
 describe("PayoutService (policy → lock → broadcast → settle)", () => {
   it("moves funds available → pending → out of the pool on a successful payout", async () => {
-    const { ledger, service, broadcaster } = await makeService(1_000_000n); // available = 995000
+    const { ledger, service, broadcaster } = await makeService(1_000_000n);
 
     const res = await service.payout(params(500_000n));
     expect(res).toEqual({ txId: "tx-1", status: "settled", from: FROM });
@@ -92,9 +92,9 @@ describe("PayoutService (policy → lock → broadcast → settle)", () => {
     });
 
     const { net } = splitFee(1_000_000n, 50);
-    expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(net - 500_000n); // debited
-    expect(await ledger.availableBalance(PENDING, USDT)).toBe(0n); // settled, not stuck
-    expect(await ledger.getBalance(POOL, USDT)).toBe(1_000_000n - 500_000n); // left the pool
+    expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(net - 500_000n);
+    expect(await ledger.availableBalance(PENDING, USDT)).toBe(0n);
+    expect(await ledger.getBalance(POOL, USDT)).toBe(1_000_000n - 500_000n);
   });
 
   it("rejects an over-limit payout before touching the ledger or broadcasting", async () => {
@@ -113,8 +113,8 @@ describe("PayoutService (policy → lock → broadcast → settle)", () => {
   });
 
   it("rejects a payout exceeding available balance and never broadcasts", async () => {
-    const { service, broadcaster } = await makeService(1_000_000n); // available 995000
+    const { service, broadcaster } = await makeService(1_000_000n);
     await expect(service.payout(params(999_999n))).rejects.toBeInstanceOf(InsufficientFundsError);
-    expect(broadcaster.sent).toHaveLength(0); // guard + lock happen before broadcast
+    expect(broadcaster.sent).toHaveLength(0);
   });
 });

@@ -1,8 +1,8 @@
-import { AuthStore, currentTotpStep, totpCode } from "@/auth";
+import { currentTotpStep, totpCode } from "@/auth";
+import { AuthStore } from "@/stores";
 import { ADMIN_TOKEN, adminAuth, makeApi } from "@test/api/harness.js";
 import { describe, expect, it } from "vitest";
 
-/** Pull the session cookie out of a set-cookie header. */
 const cookieFrom = (setCookie: string | string[] | undefined): string => {
   const raw = Array.isArray(setCookie) ? (setCookie[0] ?? "") : (setCookie ?? "");
   return raw.split(";")[0] ?? "";
@@ -39,8 +39,7 @@ describe("sign-in over HTTP", () => {
     expect(res.statusCode).toBe(200);
 
     const setCookie = String(res.headers["set-cookie"]);
-    // HttpOnly is the whole point: script on the page cannot read the session,
-    // so an XSS cannot exfiltrate it the way it could a localStorage token.
+
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toContain("SameSite=None");
     expect(setCookie).toContain("Secure");
@@ -48,7 +47,7 @@ describe("sign-in over HTTP", () => {
 
     expect(body.csrfToken).toMatch(/^[A-Za-z0-9_-]{20,}$/);
     expect(body.principal.email).toBe("viewer@cixtech.test");
-    // The session token itself is never in the body — only in the cookie.
+
     expect(JSON.stringify(body)).not.toContain(cookie.split("=")[1]);
   });
 
@@ -80,7 +79,7 @@ describe("sign-in over HTTP", () => {
     const { res, body } = await signIn(app, "ops@cixtech.test", PASSWORD);
     expect(body.status).toBe("mfa_enrolment_required");
     expect(body.totp.uri).toContain("otpauth://totp/");
-    // A correct password alone must not produce a cookie for a privileged role.
+
     expect(res.headers["set-cookie"]).toBeUndefined();
   });
 
@@ -136,7 +135,7 @@ describe("CSRF", () => {
       password: PASSWORD,
       role: "owner",
     });
-    // owner requires TOTP, so enrol through the flow to get a usable session.
+
     const { body: first } = await signIn(ctx.app, "v@cixtech.test", PASSWORD);
     const done = await ctx.app.inject({
       method: "POST",
@@ -158,8 +157,7 @@ describe("CSRF", () => {
 
   it("REFUSES a mutation carrying the cookie but no CSRF header", async () => {
     const { app, cookie } = await viewerSession();
-    // This is exactly the forged cross-site request: the browser attaches the
-    // SameSite=None cookie, and the attacker's origin cannot read the token.
+
     const res = await app.inject({ method: "POST", url: "/auth/logout-all", headers: { cookie } });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe("CSRF_FAILED");
@@ -223,8 +221,7 @@ describe("the admin plane migrates off the shared token", () => {
       url: "/admin/api/overview",
       headers: adminAuth(ADMIN_TOKEN),
     });
-    // The shared, non-expiring, unattributable credential stops being a way in
-    // the moment there is a real account to use instead.
+
     expect(res.statusCode).toBe(401);
     expect(res.json().error.message).toMatch(/operator accounts exist/i);
   });
@@ -314,13 +311,6 @@ describe("the admin plane migrates off the shared token", () => {
 describe("tenant users reach /v1 with their role's scopes", () => {
   const PASSWORD = "a-sufficiently-long-password";
 
-  /**
-   * Sign in, completing TOTP enrolment when the role requires it.
-   *
-   * `member` and `admin` do; `viewer` does not — so a helper that assumed one
-   * call would silently produce an undefined CSRF token for exactly the roles
-   * that can move money.
-   */
   async function tenantSession(role: string) {
     const ctx = await makeApi();
     await new AuthStore(ctx.engine.sql).createPrincipal({
@@ -374,8 +364,7 @@ describe("tenant users reach /v1 with their role's scopes", () => {
 
   it("does not let a member approve their own payout — separation of duties in roles", async () => {
     const { app, cookie, csrf } = await tenantSession("member");
-    // `member` can move funds but has no `approve` scope, so the credential that
-    // requests a payout structurally cannot sign it off.
+
     const res = await app.inject({
       method: "POST",
       url: "/v1/withdrawals/some-id/approve",

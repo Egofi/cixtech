@@ -30,7 +30,7 @@ describe("Phase 4: Natural Language Financial Query Engine (US-AI-01)", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.response.intent).toBe("SOLVENCY_CHECK");
-    // The answer now comes from the ledger rather than a hardcoded `true`.
+
     expect(body.response.answer.toLowerCase()).toMatch(/solvency (holds|invariant)/);
     expect(typeof body.response.data.isSolvent).toBe("boolean");
   });
@@ -41,7 +41,6 @@ describe("Phase 4: Real-Time Financial Anomaly Detector (US-AI-01)", () => {
     const ctx = await makeApi();
     const detector = new AnomalyDetector(ctx.sql);
 
-    // Populate zero-day allow-listed addresses
     for (let i = 0; i < 6; i++) {
       await ctx.sql.query(
         `INSERT INTO payout_allowlist (tenant, merchant, chain, address, usable_at)
@@ -89,7 +88,6 @@ describe("Phase 4: Autonomous Agentic Rules Engine (US-AI-01)", () => {
     const rule = createRes.json().rule;
     expect(rule.name).toBe("Auto Pause on Low Balance");
 
-    // Fetch and evaluate rules
     const getRes = await ctx.app.inject({
       method: "GET",
       url: "/v1/ai/rules",

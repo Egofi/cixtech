@@ -1,14 +1,3 @@
-// Checks on the exported console bundle, run as `pnpm test` after `next build`.
-//
-// TypeScript covers the source; these cover the OUTPUT, where a different class
-// of mistake lives. Each assertion is a failure that ships silently otherwise:
-//
-//   * a missing route        → a nav link that 404s in production only
-//   * an inlined API base    → one image per environment, and a promoted image
-//                              still pointing at the environment it was built for
-//   * config.js absent/late  → window.CIXTECH undefined when the first request
-//                              fires, so every call goes to the static host
-//   * a leaked secret        → anything credential-shaped baked into a public bundle
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,7 +27,6 @@ try {
   process.exit(1);
 }
 
-// ── Every route the navigation links to must exist as a real page ────────────
 const ROUTES = [
   "index.html",
   "admin/index.html",
@@ -69,16 +57,13 @@ for (const route of ROUTES) {
     continue;
   }
   check(body.includes("<html"), `${route}: not an HTML document`);
-  // config.js must be requested by every page that will call the API.
+
   check(body.includes("/config.js"), `${route}: does not load /config.js`);
 }
 
-// ── Runtime config, not build-time ───────────────────────────────────────────
 const config = readFileSync(join(out, "config.js"), "utf8");
 check(config.includes("window.CIXTECH"), "config.js: does not define window.CIXTECH");
 
-// A NEXT_PUBLIC_ API base would be inlined into the JS chunks, which is exactly
-// the thing this design avoids. Nothing in the bundle may reference one.
 const scripts = files.filter((f) => f.endsWith(".js"));
 for (const f of scripts) {
   const body = readFileSync(f, "utf8");
@@ -89,7 +74,6 @@ for (const f of scripts) {
   );
 }
 
-// ── No credential-shaped strings in a bundle served to the public ────────────
 const SECRET_SHAPES = [
   [/\bcxk_[0-9a-f]{16,}/, "tenant API key (cxk_…)"],
   [/\bcxs_[0-9a-f]{16,}/, "webhook secret (cxs_…)"],
@@ -103,10 +87,6 @@ for (const f of [...scripts, ...files.filter((x) => x.endsWith(".html"))]) {
   }
 }
 
-// ── The CSP allows inline script (Next's RSC bootstrap leaves no choice on a
-// static export), so React's default escaping is what stands between a hostile
-// API response and script execution. dangerouslySetInnerHTML removes that, which
-// is why its presence fails the build rather than being caught in review.
 for (const dir of ["app", "components", "lib"]) {
   let sources = [];
   try {

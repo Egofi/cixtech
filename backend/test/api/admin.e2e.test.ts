@@ -1,9 +1,10 @@
-import { LedgerService, SqlLedgerStore, depositFinalized } from "@/ledger";
+import { depositFinalized } from "@/ledger";
+import { LedgerService } from "@/services";
+import { SqlLedgerStore } from "@/stores";
 import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
 import { describe, expect, it } from "vitest";
 import { ADMIN_TOKEN, adminAuth, auth, makeApi } from "./harness.js";
 
-/** Assign a deposit address and simulate a credited deposit so the ledger has data. */
 async function seedDeposit(ctx: Awaited<ReturnType<typeof makeApi>>) {
   const acc = await ctx.app.inject({
     method: "POST",
@@ -36,13 +37,12 @@ describe("admin console API", () => {
 
   it("no longer serves the console — it ships as a separate deployable", async () => {
     const ctx = await makeApi();
-    // The console moved to apps/web so the frontend can be released without
-    // redeploying the custody engine. This process serves an API and nothing else.
+
     for (const url of ["/admin", "/admin/app.js", "/admin/styles.css"]) {
       const res = await ctx.app.inject({ method: "GET", url });
       expect(res.statusCode, `${url} should not be served by the API`).toBe(404);
     }
-    // The control-plane API it used to talk to is untouched.
+
     const api = await ctx.app.inject({
       method: "GET",
       url: "/admin/api/overview",
@@ -79,7 +79,6 @@ describe("admin console API", () => {
     expect(engage.statusCode).toBe(200);
     expect(engage.json().engaged).toBe(true);
 
-    // A tenant withdrawal is now denied by policy (kill-switch is engaged).
     const denied = await ctx.app.inject({
       method: "POST",
       url: `/v1/accounts/${accountId}/withdrawals`,
@@ -118,9 +117,7 @@ describe("admin console API", () => {
     const engage = rows.find((r) => r.action === "killswitch.engage");
     expect(engage).toBeTruthy();
     expect(engage?.result).toBe("ok");
-    // Named for the credential that was used. A session records the PERSON'S
-    // email instead — see test/auth/auth-http.test.ts. The distinction is the
-    // point: "somebody holding the shared token" must not look like a person.
+
     expect(engage?.actor).toBe("static-admin-token");
   });
 
@@ -128,7 +125,7 @@ describe("admin console API", () => {
     const ctx = await makeApi();
     await ctx.engine.webhookEndpoints.set(ctx.tenant.id, "https://x.example/hook", "cxs_secret");
     const id = await ctx.engine.webhookOutbox.enqueue(ctx.tenant.id, "deposit.confirmed", { a: 1 });
-    // Force it to dead so replay has something to do.
+
     await ctx.sql.query("UPDATE webhook_delivery SET status = 'dead' WHERE id = $1", [id]);
 
     const list = await ctx.app.inject({
@@ -164,7 +161,6 @@ describe("admin console API", () => {
     expect(res.statusCode).toBe(201);
     expect(res.json().apiKey).toMatch(/^cxk_/);
 
-    // The audit row records the name but NOT the API key.
     const audit = await ctx.app.inject({
       method: "GET",
       url: "/admin/api/audit",
@@ -211,13 +207,6 @@ describe("admin console API", () => {
     expect(["EXACT_MATCH", "SURPLUS", "DEFICIT", "UNAVAILABLE"]).toContain(body.status);
   });
 
-  /**
-   * This used to assert that a sweep succeeded, moved 5000, and could not
-   * over-sweep — all while transferring nothing on chain. That behaviour was the
-   * bug: `pool_addr` fell in the ledger while the coins stayed in the merchant's
-   * address, which is precisely the mismatch the external reconciler treats as
-   * theft. The contract is now the opposite one.
-   */
   it("refuses to collect fees when there is nowhere to send them", async () => {
     const ctx = await makeApi();
     const ledger = new LedgerService(new SqlLedgerStore(ctx.sql));
@@ -244,8 +233,6 @@ describe("admin console API", () => {
     expect(sweep.statusCode).toBe(400);
     expect(sweep.json().error.code).toBe("FEE_TREASURY_NOT_CONFIGURED");
 
-    // And critically: it posted nothing. A refused sweep must leave no trace in
-    // the ledger, or it would create the very drift it is meant to avoid.
     const { rows } = await ctx.sql.query<{ n: string }>(
       "SELECT count(*) AS n FROM journal_entry WHERE kind = 'fee.swept'",
     );

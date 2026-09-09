@@ -1,4 +1,5 @@
-import { GATHER_LEASE_SCHEMA_SQL, GatherLease } from "@/attribution/gather-lease.js";
+import { GatherLease } from "@/attribution/gather-lease.js";
+import { GATHER_LEASE_SCHEMA_SQL } from "@/schemas/sql";
 import { freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -10,12 +11,6 @@ beforeEach(async () => {
   lease = new GatherLease(db.sql, 60_000);
 });
 
-/**
- * Gathering reads on-chain balances and then spends them, and those two steps
- * are not atomic. Without this lease, a second operation reads the same balance,
- * plans the same coins, and its transfer fails on chain — after the ledger has
- * already locked the funds for it.
- */
 describe("only one thing may spend a merchant's pool at a time", () => {
   it("admits the first holder and excludes the second", async () => {
     expect(await lease.acquire("t1", "m1", "TRON", "payout-a")).toBe(true);
@@ -34,11 +29,6 @@ describe("only one thing may spend a merchant's pool at a time", () => {
     expect(await lease.acquire("t1", "m1", "BASE", "payout-c")).toBe(true);
   });
 
-  /**
-   * A process that dies mid-gather must not wedge a merchant's payouts forever,
-   * but the expiry has to comfortably exceed a broadcast — expiring early is
-   * worse than waiting, because it re-admits the race the lease exists to stop.
-   */
   it("can be taken over after it expires", async () => {
     const shortLived = new GatherLease((lease as unknown as { sql: never }).sql, 1_000);
     const t0 = new Date();
@@ -57,7 +47,6 @@ describe("only one thing may spend a merchant's pool at a time", () => {
     await shortLived.acquire("t1", "m1", "TRON", "crashed", t0);
     await shortLived.acquire("t1", "m1", "TRON", "next", new Date(t0.getTime() + 1_500));
 
-    // The crashed holder finally runs its cleanup — it must not free someone else's lease.
     await shortLived.release("t1", "m1", "TRON", "crashed");
     expect(
       await shortLived.acquire("t1", "m1", "TRON", "third", new Date(t0.getTime() + 1_600)),

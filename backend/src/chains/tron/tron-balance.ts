@@ -5,11 +5,6 @@ interface AccountResponse {
   data?: Array<{ balance?: number; trc20?: Array<Record<string, string>> }>;
 }
 
-/**
- * Reads a Tron address's on-chain balance for the gatherer (ADR 0009 §6.3):
- * native TRX from the account `balance`, TRC20 from the account's `trc20` map.
- * The gatherer needs the real on-chain balance to pick a funded payout source.
- */
 export class TronBalanceProvider implements AddressBalance {
   constructor(
     private readonly http: HttpClient,

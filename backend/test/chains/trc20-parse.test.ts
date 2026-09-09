@@ -23,7 +23,7 @@ const adapter = new TronAdapter(
 describe("TRC20 deposit parsing", () => {
   it("extracts only Transfer rows and maps them to ChainDeposits", () => {
     const deposits = parseTrc20Response(fixture);
-    expect(deposits).toHaveLength(1); // the Approval row is skipped
+    expect(deposits).toHaveLength(1);
     expect(deposits[0]).toMatchObject({
       chain: "TRON",
       to: "TRecipient000000000000000000000000",
@@ -41,7 +41,7 @@ describe("TRC20 deposit parsing", () => {
   it("rejects a malformed response at the boundary rather than coercing it", () => {
     expect(() => parseTrc20Response({ data: [{ transaction_id: "x" }] })).toThrow();
     expect(() => parseTrc20Response({ nope: true })).toThrow();
-    // a non-numeric value string must not silently become NaN/0
+
     expect(() =>
       parseTrc20Response({
         data: [{ ...fixtureRow(), value: "1.5" }],

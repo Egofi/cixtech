@@ -18,7 +18,6 @@ describe("API hardening", () => {
     const { app, apiKey } = await makeApi();
     const id = await newAccount(app, apiKey);
 
-    // Missing required `chain`.
     const missing = await app.inject({
       method: "POST",
       url: `/v1/accounts/${id}/deposit-addresses`,
@@ -29,7 +28,6 @@ describe("API hardening", () => {
     expect(missing.json().error.code).toBe("VALIDATION");
     expect(missing.json().error.id).toMatch(/^[0-9a-f-]{36}$/);
 
-    // Unknown property (additionalProperties: false).
     const extra = await app.inject({
       method: "POST",
       url: `/v1/accounts/${id}/deposit-addresses`,
@@ -38,7 +36,6 @@ describe("API hardening", () => {
     });
     expect(extra.statusCode).toBe(400);
 
-    // Non-numeric amount fails the pattern.
     const badAmount = await app.inject({
       method: "POST",
       url: `/v1/accounts/${id}/withdrawals`,
@@ -61,7 +58,7 @@ describe("API hardening", () => {
     expect(spec.paths["/v1/accounts/{id}/withdrawals"]).toBeDefined();
 
     const docs = await app.inject({ method: "GET", url: "/docs/" });
-    expect(docs.statusCode).toBe(200); // UI served, no auth
+    expect(docs.statusCode).toBe(200);
   });
 
   it("reports readiness after a DB check", async () => {
@@ -73,11 +70,8 @@ describe("API hardening", () => {
 
   it("exposes Prometheus metrics to an authorised scraper, and nobody else", async () => {
     const { app, apiKey } = await makeApi();
-    await newAccount(app, apiKey); // generate a request to count
+    await newAccount(app, apiKey);
 
-    // /metrics publishes the Node version, process start time and per-route
-    // request counts by status — enough to fingerprint the deployment and profile
-    // tenant activity. It used to be public.
     const anonymous = await app.inject({ method: "GET", url: "/metrics" });
     expect(anonymous.statusCode).toBe(401);
 
@@ -97,7 +91,7 @@ describe("API hardening", () => {
     await app.inject({ method: "POST", url: "/v1/accounts", headers: auth(apiKey), payload: {} });
 
     const out = lines.join("");
-    expect(out).toContain("/v1/accounts"); // the request was logged
-    expect(out).not.toContain(apiKey); // the secret never appears in logs
+    expect(out).toContain("/v1/accounts");
+    expect(out).not.toContain(apiKey);
   });
 });

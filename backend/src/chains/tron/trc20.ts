@@ -1,11 +1,6 @@
+import type { ChainDeposit } from "@/types";
 import { z } from "zod";
-import type { ChainDeposit } from "../chain-adapter.js";
 
-/**
- * TronGrid `/v1/accounts/{address}/transactions/trc20` response, validated at the
- * boundary (untrusted network data — spec principle: Zod every external edge).
- * Unknown fields are ignored; a malformed row is rejected loudly, not coerced.
- */
 const Trc20Tx = z.object({
   transaction_id: z.string().min(1),
   from: z.string().min(1),
@@ -24,7 +19,6 @@ const Trc20Response = z.object({ data: z.array(Trc20Tx) });
 
 export type Trc20Tx = z.infer<typeof Trc20Tx>;
 
-/** Map a validated TRC20 transfer row to a ChainDeposit. Non-transfers are skipped. */
 export function toDeposit(tx: Trc20Tx): ChainDeposit | null {
   if (tx.type !== "Transfer") return null;
   return {
@@ -39,7 +33,6 @@ export function toDeposit(tx: Trc20Tx): ChainDeposit | null {
   };
 }
 
-/** Validate a raw TronGrid response and extract the TRC20 deposits it contains. */
 export function parseTrc20Response(raw: unknown): ChainDeposit[] {
   const { data } = Trc20Response.parse(raw);
   return data.map(toDeposit).filter((d): d is ChainDeposit => d !== null);

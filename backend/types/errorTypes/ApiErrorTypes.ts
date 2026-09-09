@@ -1,0 +1,16 @@
+export const API_ERROR_CODES = [
+  "UNAUTHORIZED",
+  "FORBIDDEN_SCOPE",
+  "INVALID_SCOPES",
+  "ACCOUNT_NOT_FOUND",
+  "INVALID_DESTINATION",
+  "UNSAFE_WEBHOOK_URL",
+  "NOT_FOUND",
+  "VALIDATION",
+  "BAD_REQUEST",
+  "RATE_LIMITED",
+  "INTERNAL",
+  "UNCLASSIFIED",
+] as const;
+
+export type ApiErrorCode = (typeof API_ERROR_CODES)[number];

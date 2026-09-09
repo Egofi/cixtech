@@ -1,24 +1,20 @@
 import type { HttpClient } from "@/chains/http.js";
-import { PayoutService } from "@/chains/payout/payout-service.js";
+import { LEDGER_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService, PayoutService } from "@/services";
+import { SqlLedgerStore } from "@/stores";
+
 import { PolicyEngine } from "@/chains/payout/policy.js";
 import { TronPayoutBroadcaster } from "@/chains/payout/tron-broadcaster.js";
 import { abiEncodeTransfer, tronAddressToHex } from "@/chains/tron/tron-encoding.js";
-import {
-  LEDGER_SCHEMA_SQL,
-  LedgerService,
-  SqlLedgerStore,
-  depositFinalized,
-  splitFee,
-} from "@/ledger";
-import type { SqlClient } from "@/ledger";
+import { depositFinalized, splitFee } from "@/ledger";
+
 import type { Signer } from "@/signing";
-import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
+import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey, type SqlClient } from "@/types";
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
 import { fundedGatherer } from "./pool-fixture.js";
 import { builtTx, trc20RawData, txIdFor } from "./tron-fixtures.js";
 
-// Real, checksum-valid Tron addresses (the encoder validates them).
 const FROM = "TJkyXySVnHjqo6VDoRNxUoCh524ViKuv5h";
 const DEST = "TTetbYe8bRMfz6ASefJACCb2gSzwbe9AqW";
 const NILE_USDT = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf";
@@ -28,7 +24,6 @@ const AVAILABLE = LedgerAccountKey("merchant_available:t1:m1");
 const PENDING = LedgerAccountKey("merchant_pending_withdrawal:t1:m1");
 const POOL = LedgerAccountKey("pool_addr:TRON:m1");
 
-/** Records POSTs and returns canned node responses — the network stand-in. */
 class FakeHttp implements HttpClient {
   calls: { url: string; body: Record<string, unknown> }[] = [];
   rawDataHex = "";
@@ -38,9 +33,6 @@ class FakeHttp implements HttpClient {
   async postJson<T>(url: string, body: unknown): Promise<T> {
     this.calls.push({ url, body: body as Record<string, unknown> });
     if (url.endsWith("/triggersmartcontract")) {
-      // An honest node response: the body really is the transfer that was asked
-      // for, and txID really is its hash. The broadcaster checks both before it
-      // will sign (see tron-tx-verify.ts).
       const b = body as { owner_address: string; contract_address: string; parameter: string };
       this.rawDataHex = trc20RawData(b.owner_address, b.contract_address, `a9059cbb${b.parameter}`);
       return { result: { result: true }, transaction: builtTx(this.rawDataHex) } as T;
@@ -50,7 +42,6 @@ class FakeHttp implements HttpClient {
   }
 }
 
-// A Signer whose signature is a recognizable 65-byte pattern (0xab…).
 const signer: Signer = {
   deriveAddress: () => FROM,
   signHash: () => Uint8Array.from(new Array(65).fill(0xab)),
@@ -105,11 +96,9 @@ describe("guarded payout wired to the real Tron broadcaster (offline)", () => {
       destination: DEST,
       idempotencyKey: "pay-1",
     });
-    // The txId is now derived from the transaction body, not taken on the node's
-    // word — so it is whatever hashing that body produces.
+
     expect(res).toEqual({ txId: txIdFor(http.rawDataHex), status: "settled", from: FROM });
 
-    // The broadcaster built the correct TRC20 transfer and then broadcast it signed.
     const trigger = http.calls.find((c) => c.url.endsWith("/triggersmartcontract"))?.body;
     expect(trigger?.["owner_address"]).toBe(tronAddressToHex(FROM));
     expect(trigger?.["contract_address"]).toBe(tronAddressToHex(NILE_USDT));
@@ -117,7 +106,6 @@ describe("guarded payout wired to the real Tron broadcaster (offline)", () => {
     const broadcast = http.calls.find((c) => c.url.endsWith("/broadcasttransaction"))?.body;
     expect(broadcast?.["signature"]).toEqual(["ab".repeat(65)]);
 
-    // The ledger moved available → pending → out of the pool, consistently.
     const { net } = splitFee(10_000_000n, 50);
     expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(net - 1_000_000n);
     expect(await ledger.availableBalance(PENDING, USDT)).toBe(0n);

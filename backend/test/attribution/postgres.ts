@@ -1,5 +1,6 @@
-import { POOL_SCHEMA_SQL } from "@/attribution/pool-store.js";
-import type { SqlClient } from "@/ledger";
+import { POOL_SCHEMA_SQL } from "@/schemas/sql";
+import type { SqlClient } from "@/types";
+
 import { type TestDatabase, freshDatabase } from "@test/support/index.js";
 
 export async function freshPool(): Promise<{ db: TestDatabase; sql: SqlClient }> {
@@ -8,6 +9,5 @@ export async function freshPool(): Promise<{ db: TestDatabase; sql: SqlClient }>
   return { db, sql: db.sql };
 }
 
-/** Deterministic fake deriver: distinct per (chain, xpub, index), as real derivation is. */
 export const fakeDerive = (chain: string, xpub: string, index: number): string =>
   `${chain}:${xpub}:${index}`;

@@ -13,13 +13,11 @@ describe("Tron keypair signing", () => {
     const address = signer.deriveAddress(0);
     expect(address.startsWith("T")).toBe(true);
 
-    // A stand-in txID (32-byte hex, as the node returns for an unsigned tx).
     const txId = "9c8e7d6f".repeat(8);
     const sigHex = signTronTxId(signer, 0, txId);
     const sig = Uint8Array.from(Buffer.from(sigHex, "hex"));
     expect(sig).toHaveLength(65);
 
-    // Recover the signer and confirm it is the key behind the payout address.
     const hash = Uint8Array.from(Buffer.from(txId, "hex"));
     const recovered = secp256k1.Signature.fromCompact(sig.subarray(0, 64))
       .addRecoveryBit(sig[64] as number)

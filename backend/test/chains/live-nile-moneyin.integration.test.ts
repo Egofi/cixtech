@@ -2,15 +2,15 @@ import type { Attribution } from "@/attribution";
 import { FetchHttpClient } from "@/chains/http.js";
 import { DepositIngestor } from "@/chains/ingest/deposit-ingestor.js";
 import { TronAdapter } from "@/chains/tron/tron-adapter.js";
-import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore, splitFee } from "@/ledger";
-import type { SqlClient } from "@/ledger";
-import { Asset, LedgerAccountKey } from "@/types";
+import { splitFee } from "@/ledger";
+import { LEDGER_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService } from "@/services";
+import { SqlLedgerStore } from "@/stores";
+
+import { Asset, LedgerAccountKey, type SqlClient } from "@/types";
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
 
-// Gated on CIXTECH_LIVE_NILE. The FULL money-in round trip against LIVE Nile
-// testnet with real funds: fetch a real USDT-TRC20 deposit → parse → ingest →
-// credit the real ledger. Nile needs no API key.
 const RUN = process.env["CIXTECH_LIVE_NILE"];
 const MERCHANT_ADDRESS = "TJkyXySVnHjqo6VDoRNxUoCh524ViKuv5h";
 const BPS = 50;
@@ -57,11 +57,10 @@ describe.skipIf(!RUN)("LIVE Nile money-in (gated on CIXTECH_LIVE_NILE)", () => {
       net += s.net;
       fee += s.fee;
     }
-    expect(await ledger.getBalance(POOL, USDT)).toBe(gross); // whole gross held in the pool
-    expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(net); // merchant net
-    expect(await ledger.availableBalance(FEE, USDT)).toBe(fee); // egofi 0.5%
+    expect(await ledger.getBalance(POOL, USDT)).toBe(gross);
+    expect(await ledger.availableBalance(AVAILABLE, USDT)).toBe(net);
+    expect(await ledger.availableBalance(FEE, USDT)).toBe(fee);
 
-    // Re-observing the same deposits never double-credits.
     for (const d of deposits) {
       expect((await ingestor.ingestConfirmed(d)).status).toBe("duplicate");
     }

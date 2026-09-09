@@ -4,17 +4,6 @@ import { type Me, currentSession, logout as doLogout } from "@/lib/session";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { SignIn } from "./sign-in";
 
-/**
- * The wall in front of a console.
- *
- * Replaces the old AuthGate, which stored a long-lived API key in localStorage.
- * The session is an httpOnly cookie now, so this component cannot see it — it
- * asks the API who it is on mount, which also recovers the CSRF token a reload
- * discarded.
- *
- * Rendering waits for that answer. Guessing "signed out" and correcting after
- * would flash the login form at every signed-in operator on every page load.
- */
 export function SessionGate({
   kind,
   title,
@@ -57,13 +46,6 @@ export function SessionGate({
   return <>{children(me, signOut)}</>;
 }
 
-/**
- * Forced password change.
- *
- * An account created by an administrator is handed over with a temporary
- * password, and that password must not survive the handover — so nothing else
- * in the console is reachable until it is replaced.
- */
 function ChangePassword({ onDone }: { onDone: () => void }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -89,8 +71,7 @@ function ChangePassword({ onDone }: { onDone: () => void }) {
               method: "POST",
               body: { currentPassword: current, newPassword: next },
             });
-            // Changing the password ends every other session, so the API issues a
-            // fresh one here with a new CSRF token.
+
             setCsrfToken(res.csrfToken);
             onDone();
           } catch (err) {

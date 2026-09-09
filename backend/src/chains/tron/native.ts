@@ -1,16 +1,8 @@
+import type { ChainDeposit } from "@/types";
 import { z } from "zod";
-import type { ChainDeposit } from "../chain-adapter.js";
+
 import { tronAddressFromHex } from "./address.js";
 
-/**
- * Native TRX transfers from TronGrid `/v1/accounts/{address}/transactions`,
- * validated at the boundary. Only `TransferContract` rows that succeeded
- * (`contractRet === "SUCCESS"`) become deposits — a reverted transfer must never
- * credit. Addresses arrive hex-encoded; amounts are in SUN (1 TRX = 1e6 SUN).
- *
- * NOTE: TronGrid returns native `amount` as a JSON number. TRX amounts on
- * testnet stay well within safe-integer range; TRC20 uses an exact string value.
- */
 const TransferContractValue = z.object({
   owner_address: z.string(),
   to_address: z.string(),
@@ -35,7 +27,7 @@ export function parseNativeTransfers(raw: unknown): ChainDeposit[] {
   for (const tx of data) {
     const contract = tx.raw_data.contract[0];
     if (!contract || contract.type !== "TransferContract") continue;
-    if (tx.ret?.[0]?.contractRet !== "SUCCESS") continue; // reverted transfers never credit
+    if (tx.ret?.[0]?.contractRet !== "SUCCESS") continue;
 
     const value = TransferContractValue.parse(contract.parameter.value);
     deposits.push({

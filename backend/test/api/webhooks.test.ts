@@ -1,4 +1,4 @@
-import { signWebhook, verifyWebhook } from "@/api/webhooks.js";
+import { signWebhook, verifyWebhook } from "@/chains";
 import { describe, expect, it } from "vitest";
 
 describe("webhook signing", () => {

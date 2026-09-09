@@ -1,11 +1,11 @@
-import { ChainMisconfiguredError, buildRouter } from "@/chains/build-router.js";
-import type { SqlClient } from "@/ledger";
+import { buildRouter } from "@/chains/build-router.js";
+import { ChainMisconfiguredError } from "@/common";
+import type { SqlClient } from "@/types";
+
 import { beforeEach, describe, expect, it } from "vitest";
 
-/** buildRouter only needs a client to construct the cursor store; nothing queries here. */
 const sql = { query: async () => ({ rows: [] }) } as unknown as SqlClient;
 
-/** An account-level xprv is required to boot; this one is test-only. */
 const XPRV =
   "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi";
 
@@ -17,13 +17,6 @@ describe("a chain that cannot resolve its tokens must not register", () => {
     process.env["CHAIN_ENV"] = "testnet";
   });
 
-  /**
-   * The failure this prevents is silent, which is what makes it dangerous: an
-   * unresolved contract makes the balance provider answer 0, the gatherer reads
-   * 0 as "no funds on chain", and a payout is refused while the money sits in
-   * the pool address. Nothing logs an error — the operator just sees a balance
-   * that is wrong in the safe-looking direction.
-   */
   it("refuses to boot when an RPC URL is set but the token address is not", () => {
     const env = { ...baseEnv(), TRON_RPC_URL: "https://nile.example" };
     expect(() => buildRouter(env, sql)).toThrow(ChainMisconfiguredError);
@@ -48,13 +41,6 @@ describe("a chain that cannot resolve its tokens must not register", () => {
     expect(router.has("BASE")).toBe(true);
   });
 
-  /**
-   * .env.example lists every chain with an empty value, so the file is a full
-   * inventory rather than a guessing game. That only works if an empty value
-   * reads as "not configured" — otherwise copying the template to .env would
-   * arm every chain at once and the engine would refuse to boot on the first
-   * missing token address.
-   */
   it("treats an empty RPC URL as not configured, not as a broken chain", () => {
     const env = {
       ...baseEnv(),
@@ -77,7 +63,7 @@ describe("a chain that cannot resolve its tokens must not register", () => {
       BASE_USDC_ADDRESS: "0x1111111111111111111111111111111111111111",
       BASE_USDT_ADDRESS: "0x2222222222222222222222222222222222222222",
     };
-    // TRON has no RPC URL, so its missing token address is not a misconfiguration.
+
     expect(() => buildRouter(env, sql)).not.toThrow();
   });
 });

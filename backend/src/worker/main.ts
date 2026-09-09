@@ -1,18 +1,22 @@
 import { createServer } from "node:http";
-import { PoolBalanceCache, PoolManager, PooledAttribution, SqlPoolStore } from "@/attribution";
-import { ChainRegistry, assetRegistry, chainTokens } from "@/chain-config";
+import { PoolManager, PooledAttribution } from "@/attribution";
+import { PoolBalanceCache } from "@/attribution";
+import { assetRegistry } from "@/chain-config";
+import { ChainRegistry, chainTokens } from "@/chain-config";
 import {
-  DepositIngestor,
   DepositWatcher,
   ExternalReconciler,
   FetchWebhookPoster,
-  SqlKillSwitch,
   WebhookDispatcher,
   WebhookEndpointStore,
   WebhookOutbox,
   buildRouter,
 } from "@/chains";
-import { LedgerService, SqlLedgerStore } from "@/ledger";
+import { DepositIngestor } from "@/chains";
+import { SqlErrorSink, handleError, resolveError } from "@/common";
+import { LedgerService } from "@/services";
+import { SqlKillSwitch, SqlLedgerStore, SqlPoolGroupEnumerator, SqlPoolStore } from "@/stores";
+
 import { openDatabase } from "@/postgres";
 import type { Worker } from "bullmq";
 
@@ -26,23 +30,21 @@ import {
   createRedisConnection,
   upsertRepeatable,
 } from "./queues.js";
-import { SqlPoolGroupEnumerator } from "./stores/pool-group-enumerator.js";
+
 import { startDetectionWorker } from "./workers/detection-worker.js";
 import { startPoolBalanceWorker } from "./workers/pool-balance-worker.js";
 import { startPoolReleaseWorker } from "./workers/pool-release-worker.js";
 import { startReconcilerWorker } from "./workers/reconciler-worker.js";
 import { startWebhookWorker } from "./workers/webhook-worker.js";
 
-// ── Config ──────────────────────────────────────────────────────────────────
-
 const WEBHOOK_DISPATCH_INTERVAL_MS = 5_000;
 const POOL_RELEASE_INTERVAL_MS = 60_000;
-const DEFAULT_RECONCILE_INTERVAL_MS = 5 * 60_000; // 5 minutes
-/** Balances back a console table, not a money decision — minutes of staleness is fine. */
-const DEFAULT_POOL_BALANCE_INTERVAL_MS = 2 * 60_000; // 2 minutes
-/** Detection cadence. Was the API's setInterval; same 15s, one poller now. */
+const DEFAULT_RECONCILE_INTERVAL_MS = 5 * 60_000;
+
+const DEFAULT_POOL_BALANCE_INTERVAL_MS = 2 * 60_000;
+
 const DEFAULT_DETECTION_INTERVAL_MS = 15_000;
-/** Pool cool-off before an address returns to AVAILABLE (ADR 0009). */
+
 const POOL_COOLDOWN_MS = 30 * 60_000;
 
 function log(msg: string, data?: Record<string, unknown>): void {
@@ -65,12 +67,9 @@ function logError(msg: string, data?: Record<string, unknown>): void {
   console.error(JSON.stringify(entry));
 }
 
-// ── Bootstrap ───────────────────────────────────────────────────────────────
-
 async function main(): Promise<void> {
   const env = process.env;
 
-  // ── Database ──────────────────────────────────────────────────────────────
   const redisUrl = env["REDIS_URL"];
   if (!redisUrl) {
     throw new Error(
@@ -81,15 +80,12 @@ async function main(): Promise<void> {
   const db = openDatabase(env);
   const sql = db.sql;
 
-  // ── Redis ─────────────────────────────────────────────────────────────────
   const redis = createRedisConnection(redisUrl);
-  await redis.ping(); // fail fast if Redis is unreachable
+  await redis.ping();
   log("redis connected", { url: redisUrl.replace(/\/\/.*@/, "//***@") });
 
-  // ── Queues ────────────────────────────────────────────────────────────────
   const queues = createQueues(redis);
 
-  // Webhook dispatcher
   const webhookOutbox = new WebhookOutbox(sql);
   const webhookEndpoints = new WebhookEndpointStore(sql);
   const webhookDispatcher = new WebhookDispatcher(
@@ -98,7 +94,6 @@ async function main(): Promise<void> {
     new FetchWebhookPoster(),
   );
 
-  // External reconciler
   const registry = new ChainRegistry();
   const assets = Object.keys(assetRegistry());
   const enumerator = new SqlPoolGroupEnumerator(sql);
@@ -111,9 +106,6 @@ async function main(): Promise<void> {
   };
   const useChainBalances = env["CIXTECH_RECONCILE_CHAIN_BALANCES"] === "true";
 
-  // One router serves both the reconciler and the balance cache. Built lazily
-  // because a worker with no chain configured must still run the queues that do
-  // not touch a chain at all.
   let router: ReturnType<typeof buildRouter> | null = null;
   try {
     router = buildRouter(env, sql);
@@ -144,25 +136,11 @@ async function main(): Promise<void> {
     );
   }
 
-  /**
-   * Deposit detection (build spec §8), moved here from the API.
-   *
-   * Needs the same three pieces the API's engine wired: the pool (which addresses
-   * to watch), the chain's deposit source (what landed), and the ingestor (credit
-   * it, minus the platform fee). Credits enqueue a `deposit.confirmed` webhook to
-   * the outbox that the webhook worker above already drains.
-   *
-   * The fee basis points MUST match the API's `CIXTECH_FEE_BPS`, because this is
-   * the process that now decides what a merchant is credited. A mismatch would
-   * split the fee differently depending on which process ingested — so it reads
-   * the same variable and the same default.
-   */
   const feeBasisPoints = Number(env["CIXTECH_FEE_BPS"] ?? "50");
   const detectionInterval = Number(
     env["CIXTECH_DETECTION_INTERVAL_MS"] ?? String(DEFAULT_DETECTION_INTERVAL_MS),
   );
 
-  // Pool release
   const poolStore = new SqlPoolStore(sql);
   const poolReleaseFn = {
     async releaseCooledAddresses(now: Date = new Date()): Promise<number> {
@@ -170,7 +148,6 @@ async function main(): Promise<void> {
     },
   };
 
-  // ── Register repeatable schedules ─────────────────────────────────────────
   const reconcileInterval = Number(
     env["CIXTECH_RECONCILE_INTERVAL_MS"] ?? String(DEFAULT_RECONCILE_INTERVAL_MS),
   );
@@ -192,9 +169,6 @@ async function main(): Promise<void> {
     [QUEUE_DEPOSIT_DETECT]: router ? `${detectionInterval}ms` : "disabled (no chain router)",
   });
 
-  // Detection cannot run without a chain to poll. Say so at ERROR rather than
-  // starting quietly: this process owns deposit credit now, and a worker that
-  // silently is not detecting looks identical to a chain with no deposits.
   if (!router) {
     logError(
       "DEPOSIT DETECTION IS NOT RUNNING: no chain router could be built. " +
@@ -202,15 +176,12 @@ async function main(): Promise<void> {
     );
   }
 
-  // ── Start workers ─────────────────────────────────────────────────────────
   const workers: Worker[] = [
     startWebhookWorker(redis, webhookDispatcher, log),
     startReconcilerWorker(redis, reconciler, log),
     startPoolReleaseWorker(redis, poolReleaseFn, log),
   ];
 
-  // The balance cache needs a chain to read from; without a router the console
-  // simply shows no observations rather than the worker failing to start.
   if (router) {
     const chainRouter = router.router;
 
@@ -243,6 +214,17 @@ async function main(): Promise<void> {
     );
   }
 
+  const errorSink = new SqlErrorSink(sql);
+  for (const worker of workers) {
+    worker.on("failed", (job, err) => {
+      void handleError(err, {
+        sink: errorSink,
+        onCritical: (record) =>
+          logError("critical job failure", { job: job?.name, code: record.code, id: record.id }),
+      });
+    });
+  }
+
   log("workers started", {
     count: workers.length,
     queues: [
@@ -254,7 +236,6 @@ async function main(): Promise<void> {
     ],
   });
 
-  // ── Health endpoint ───────────────────────────────────────────────────────
   const port = Number(env["WORKER_PORT"] ?? "3001");
   const server = createServer((_req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
@@ -264,7 +245,6 @@ async function main(): Promise<void> {
     log("worker health endpoint listening", { port });
   });
 
-  // ── Graceful shutdown ─────────────────────────────────────────────────────
   const shutdown = async (signal: string) => {
     log("shutting down", { signal });
     server.close();
@@ -281,8 +261,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  logError("worker failed to start", {
-    error: err instanceof Error ? err.message : String(err),
-  });
+  const { record } = resolveError(err);
+  logError("worker failed to start", { code: record.code, id: record.id, error: record.message });
   process.exit(1);
 });

@@ -5,11 +5,6 @@ import { useEffect, useState } from "react";
 type Theme = "system" | "light" | "dark";
 const KEY = "cx_theme";
 
-/**
- * Three states, not two: no attribute means "follow the OS", and an explicit
- * choice stamps `data-theme` on <html> so the CSS override blocks win in both
- * directions. The design system is written against exactly that contract.
- */
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>("system");
 
@@ -17,9 +12,7 @@ export function ThemeToggle() {
     let stored: Theme = "system";
     try {
       stored = (window.localStorage.getItem(KEY) as Theme) ?? "system";
-    } catch {
-      /* storage blocked — follow the OS */
-    }
+    } catch {}
     setTheme(stored);
     apply(stored);
   }, []);
@@ -37,9 +30,7 @@ export function ThemeToggle() {
     apply(next);
     try {
       window.localStorage.setItem(KEY, next);
-    } catch {
-      /* not persisted; the page still respects the choice */
-    }
+    } catch {}
   }
 
   const icon = theme === "light" ? "☀" : theme === "dark" ? "☾" : "◐";

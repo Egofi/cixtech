@@ -1,42 +1,12 @@
-import { AppError } from "@/errors";
-import type { GatherStrategyKind } from "./gather-strategy.js";
+import { InsufficientPoolFundsError } from "@/common";
+import type { GatherStrategyKind, GatheredLeg, GatheredSource } from "@/types";
+
 import type { PoolManager } from "./pool-manager.js";
 
-/** Reads a pool address's on-chain balance for an asset (the gather source of truth). */
 export interface AddressBalance {
   balance(chain: string, address: string, asset: string): Promise<bigint>;
 }
 
-/** A pool address selected to fund a payout, with the Signer index that controls it. */
-export interface GatheredSource {
-  address: string;
-  derivationIndex: number;
-  /**
-   * The strategy this address was minted under (ADR 0011). Carried on the leg so
-   * the payout drains it with the mechanism that created it, whatever the current
-   * toggle says.
-   */
-  gatherStrategy: GatherStrategyKind;
-}
-
-/** One leg of a multi-address gather: how much to pull from this pool address. */
-export interface GatheredLeg extends GatheredSource {
-  /** Base units to spend from this address (≤ its on-chain balance). */
-  amountBaseUnits: bigint;
-}
-
-export class InsufficientPoolFundsError extends AppError {
-  readonly code = "POOL_INSUFFICIENT_FUNDS";
-}
-
-/**
- * Chooses which of a merchant's pool addresses funds a payout (ADR 0009 §6.3).
- * First cut: pick a single address whose on-chain balance covers the amount —
- * the common case where one deposit funds one payout. Multi-address
- * consolidation (a gather across several addresses, one tx each on Tron/EVM) is
- * the next step; until then a payout larger than any single address is rejected
- * rather than silently mishandled.
- */
 export class PoolGatherer {
   constructor(
     private readonly pool: PoolManager,
@@ -67,15 +37,6 @@ export class PoolGatherer {
     );
   }
 
-  /**
-   * Gather funding for a payout across as MANY of the merchant's pool addresses as
-   * it takes to cover `amount` (ADR 0009 §6.3). Deposits accumulate across a
-   * bounded pool, so a payout larger than any single address is normal; this
-   * consolidates them. Prefers larger balances first (fewest legs → fewest
-   * on-chain transfers on EVM/Tron), takes the exact remainder from the last leg,
-   * and rejects only when the merchant's total on-chain balance genuinely falls
-   * short — never silently underpays.
-   */
   async gather(
     tenant: string,
     merchant: string,

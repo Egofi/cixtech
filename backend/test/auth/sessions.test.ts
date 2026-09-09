@@ -1,13 +1,9 @@
 import { applySchemas } from "@/api/sql.js";
-import { AuthStore, DEFAULT_SESSION_CONFIG, currentTotpStep, totpCode } from "@/auth";
+import { currentTotpStep, totpCode } from "@/auth";
+import { AuthStore, DEFAULT_SESSION_CONFIG } from "@/stores";
 import { freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
-/**
- * The properties a session system has to hold, each stated as the failure it
- * prevents. A long-lived API key in localStorage — what the consoles used before
- * — provides none of them.
- */
 describe("human sessions", () => {
   let db: Awaited<ReturnType<typeof freshDatabase>>;
   let store: AuthStore;
@@ -42,8 +38,7 @@ describe("human sessions", () => {
     const wrong = await store
       .verifyCredentials({ ...OPERATOR, password: "x" })
       .catch((e: Error) => e.message);
-    // Differing messages here would turn the login form into an account-
-    // enumeration oracle.
+
     expect(unknown).toBe(wrong);
   });
 
@@ -71,8 +66,7 @@ describe("human sessions", () => {
     expect((await store.resolveSession(token))?.principal.id).toBe(p.id);
 
     await store.revokeSession(session.id);
-    // The point of server-side sessions: revocation is instant, with no waiting
-    // for a token to expire and no rotating a shared credential.
+
     expect(await store.resolveSession(token)).toBeNull();
   });
 
@@ -90,8 +84,7 @@ describe("human sessions", () => {
     const { token, session } = await s.createSession(p.id);
 
     const resolved = await s.resolveSession(token);
-    // Idle window is longer than the absolute lifetime, so it must clamp — a
-    // session that slid past its absolute expiry would be unbounded.
+
     expect(resolved?.session.idleExpiresAt.getTime()).toBeLessThanOrEqual(
       session.expiresAt.getTime(),
     );
@@ -136,7 +129,7 @@ describe("human sessions", () => {
 describe("second factor", () => {
   let db: Awaited<ReturnType<typeof freshDatabase>>;
   let store: AuthStore;
-  // `operator` requires TOTP; `viewer` does not.
+
   const PRIV = {
     kind: "operator" as const,
     email: "ops@cixtech.test",
@@ -153,8 +146,7 @@ describe("second factor", () => {
   it("demands enrolment before a privileged role gets a session", async () => {
     await store.createPrincipal(PRIV);
     const res = await store.verifyCredentials({ ...PRIV });
-    // A correct password alone must not produce a session for a role that can
-    // reach the kill switch.
+
     expect(res.outcome).toBe("mfa_enrolment_required");
   });
 
@@ -185,12 +177,10 @@ describe("second factor", () => {
     const secret = await store.beginTotpEnrolment(p.id);
     await store.confirmTotp(p.id, totpCode(secret, currentTotpStep()));
 
-    // A fresh step, so enrolment's own step does not mask the result.
     const now = new Date(Date.now() + 60_000);
     const code = totpCode(secret, currentTotpStep(now));
     expect(await store.verifySecondFactor(p.id, code, now)).toBe(true);
-    // Replay inside the same 30-second window must fail, or an observed code is
-    // reusable for its whole life.
+
     expect(await store.verifySecondFactor(p.id, code, now)).toBe(false);
   });
 

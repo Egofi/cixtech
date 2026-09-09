@@ -2,17 +2,6 @@
 
 import { apiUrl } from "./config";
 
-/**
- * The browser half of the session system.
- *
- * The session itself is an httpOnly cookie this code cannot read — that is the
- * point, and it is what makes an XSS unable to exfiltrate it. What the page
- * holds is the CSRF token, in memory only, echoed on every mutation.
- *
- * `credentials: "include"` on every call, because the API is a different origin
- * and the browser will not attach a cross-site cookie without it.
- */
-
 export type Permission =
   | "admin.read"
   | "admin.tenants.manage"
@@ -46,13 +35,6 @@ export class SessionError extends Error {
   }
 }
 
-/**
- * The CSRF token, in a module variable rather than storage.
- *
- * Putting it in localStorage would hand it to the same XSS the httpOnly cookie
- * is protecting the session from, which would defeat the double-submit entirely.
- * A page reload loses it and re-reads it from `GET /auth/session`.
- */
 let csrfToken: string | null = null;
 export const setCsrfToken = (t: string | null) => {
   csrfToken = t;
@@ -134,13 +116,6 @@ export async function submitMfa(
   return res;
 }
 
-/**
- * Re-establish the session after a page reload. Null when not signed in.
- *
- * The CSRF token lives in memory only, so a reload loses it — this is where it
- * comes back. The httpOnly cookie survived the reload on its own; only the
- * double-submit half needs recovering.
- */
 export async function currentSession(): Promise<Me | null> {
   try {
     const res = await apiFetch<{ principal: Me; csrfToken: string }>("/auth/session");

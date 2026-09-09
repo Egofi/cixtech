@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { adminAuth, auth, makeApi } from "./harness.js";
 
-/** Assign a deposit address so there is a pool row to report on. */
 async function seedAddress(ctx: Awaited<ReturnType<typeof makeApi>>) {
   const acc = await ctx.app.inject({
     method: "POST",
@@ -41,11 +40,6 @@ describe("the pool address explorer", () => {
     });
   });
 
-  /**
-   * A balance nobody has observed must read as absent, not as zero. Zero is a
-   * fact about the chain; null is a fact about our reading of it, and conflating
-   * them is what makes an unread address look like an empty one.
-   */
   it("reports an unobserved balance as absent rather than zero", async () => {
     const ctx = await makeApi();
     await seedAddress(ctx);
@@ -80,15 +74,10 @@ describe("the pool address explorer", () => {
     expect(row.observedAt).toEqual(expect.any(String));
   });
 
-  /**
-   * The drift number is the whole point of the screen: it is the same comparison
-   * ExternalReconciler makes, and a non-zero value there trips the breaker and
-   * halts every payout. Seeing it here is the pre-flight.
-   */
   it("reports the group's ledger-versus-chain drift", async () => {
     const ctx = await makeApi();
     const { address } = await seedAddress(ctx);
-    // Chain holds 4.2 USDT; the ledger has recorded nothing.
+
     await ctx.sql.query(
       `INSERT INTO pool_address_balance (chain, address, asset, balance_base_units, source)
        VALUES ('TRON', $1, 'USDT', 4200000, 'test')`,
@@ -128,11 +117,6 @@ describe("the pool address explorer", () => {
 });
 
 describe("collecting the fee", () => {
-  /**
-   * Without a treasury address there is nowhere for a real transfer to go. The
-   * old implementation had no such requirement because it moved nothing — it
-   * posted a ledger entry and left the coins in the merchant's pool address.
-   */
   it("refuses when no fee treasury address is configured", async () => {
     const ctx = await makeApi();
     const res = await ctx.app.inject({

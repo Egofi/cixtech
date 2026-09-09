@@ -1,11 +1,3 @@
-// Development runner: load .env, bundle one entry point, run it.
-//
-//   node dev-run.mjs api        # the HTTP API        (pnpm dev)
-//   node dev-run.mjs worker     # background worker   (pnpm dev:worker)
-//   node dev-run.mjs migrate    # apply the schema    (pnpm db:migrate)
-//
-// Env precedence: the real process environment always wins, then .env.dev
-// (or CIXTECH_ENV_FILE), then .env.
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -19,13 +11,6 @@ const ENTRIES = {
   migrate: "src/api/migrate.ts",
 };
 
-/**
- * Strip a trailing `# comment` from an unquoted value.
- *
- * Only when the `#` is preceded by whitespace, and never inside quotes — a
- * database password may legitimately contain a `#`, and silently truncating one
- * produces an authentication failure nobody can explain from the file.
- */
 function stripInlineComment(raw) {
   const v = raw.trim();
   if (v.startsWith('"') || v.startsWith("'")) {

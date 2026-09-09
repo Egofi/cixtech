@@ -1,16 +1,9 @@
-import type { ExternalDriftRow, ExternalReconciler } from "@/chains";
+import type { ExternalReconciler } from "@/chains";
+import type { ExternalDriftRow } from "@/types";
 import { Worker } from "bullmq";
 import type IORedis from "ioredis";
 import { QUEUE_EXTERNAL_RECONCILE, connectionOpts } from "../queues.js";
 
-/**
- * BullMQ worker for external reconciliation (build spec §8, ADR 0010).
- *
- * Runs the already-written `ExternalReconciler.run()` on a repeatable schedule.
- * Each tick compares the ledger's pool balances against independent on-chain
- * balances and trips the circuit breaker (SqlKillSwitch) on drift — theft, a
- * missed deposit, or a bug freeze withdrawals rather than silently diverging.
- */
 export function startReconcilerWorker(
   redis: IORedis,
   reconciler: ExternalReconciler,

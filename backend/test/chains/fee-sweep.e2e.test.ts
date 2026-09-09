@@ -1,9 +1,12 @@
-import { type AddressBalance, POOL_SCHEMA_SQL, PoolManager, SqlPoolStore } from "@/attribution";
+import { type AddressBalance, PoolManager } from "@/attribution";
 import { ExternalReconciler } from "@/chains/reconcile/external-reconciler.js";
 import { FeeSweepPlanner } from "@/chains/treasury/fee-sweep-planner.js";
-import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore, depositFinalized } from "@/ledger";
-import type { SqlClient } from "@/ledger";
-import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
+import { depositFinalized } from "@/ledger";
+import { LEDGER_SCHEMA_SQL, POOL_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService } from "@/services";
+import { SqlLedgerStore, SqlPoolStore } from "@/stores";
+
+import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey, type SqlClient } from "@/types";
 import { freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -13,7 +16,6 @@ const MERCHANT = "m1";
 const CHAIN = "TRON";
 const ASSET = "USDT";
 
-/** The chain's view, mutated as transfers "land" so ledger and chain can be compared. */
 let onChain: Record<string, bigint>;
 const balances: AddressBalance = {
   async balance(_c, address) {
@@ -26,7 +28,6 @@ let ledger: LedgerService;
 let pool: PoolManager;
 let planner: FeeSweepPlanner;
 
-/** A 10.000000 USDT deposit: 9.95 to the merchant, 0.05 to fee revenue, 10 into the pool. */
 async function deposit(index: number, gross: bigint, feeBps: number): Promise<void> {
   await ledger.post(
     depositFinalized({
@@ -59,7 +60,7 @@ beforeEach(async () => {
 
 describe("what the platform is owed", () => {
   it("is the pool balance minus what the merchant is owed", async () => {
-    await deposit(0, 10_000_000n, 50); // 10 USDT, 0.5% → merchant 9.95, fee 0.05
+    await deposit(0, 10_000_000n, 50);
     expect(await planner.claim(TENANT, MERCHANT, ASSET)).toBe(50_000n);
   });
 
@@ -69,13 +70,8 @@ describe("what the platform is owed", () => {
     expect(await planner.claim(TENANT, MERCHANT, ASSET)).toBe(150_000n);
   });
 
-  /**
-   * The claim is DERIVED from the liabilities, so it cannot exceed them however
-   * the arithmetic is approached. This is what makes it safe to compute without a
-   * separate per-merchant fee account to drift out of step.
-   */
   it("is zero for a merchant who is owed everything in their pool", async () => {
-    await deposit(0, 10_000_000n, 0); // no fee taken
+    await deposit(0, 10_000_000n, 0);
     expect(await planner.claim(TENANT, MERCHANT, ASSET)).toBe(0n);
   });
 
@@ -92,7 +88,7 @@ describe("what the platform is owed", () => {
         feeRevenue: LedgerAccountKey(`egofi_fee_revenue:${TENANT}`),
       }),
     );
-    // Liability on this merchant, but nothing in THIS chain's pool.
+
     const plan = await planner.plan(TENANT, MERCHANT, CHAIN, ASSET);
     expect(plan.claimBaseUnits).toBe(0n);
     expect(plan.legs).toEqual([]);
@@ -108,14 +104,9 @@ describe("planning which addresses pay it", () => {
     ]);
   });
 
-  /**
-   * The failure this prevents is a fee leg and a payout leg both planning to
-   * spend the same coins — the second transfer would fail on chain and turn a
-   * bookkeeping improvement into a stuck payout.
-   */
   it("will not spend a balance a payout has already committed", async () => {
     await deposit(0, 10_000_000n, 50);
-    const reserved = new Map([[ADDR(0), 9_990_000n]]); // leaves only 10_000 free
+    const reserved = new Map([[ADDR(0), 9_990_000n]]);
     const plan = await planner.plan(TENANT, MERCHANT, CHAIN, ASSET, reserved);
     expect(plan.legs).toEqual([
       expect.objectContaining({ address: ADDR(0), amountBaseUnits: 10_000n }),
@@ -123,7 +114,7 @@ describe("planning which addresses pay it", () => {
   });
 
   it("leaves a residual too small to be worth its gas", async () => {
-    await deposit(0, 10_000_000n, 50); // claim 50_000
+    await deposit(0, 10_000_000n, 50);
     const dusty = new FeeSweepPlanner(sql, pool, balances, {
       dustThresholdBaseUnits: 100_000n,
     });
@@ -134,14 +125,6 @@ describe("planning which addresses pay it", () => {
   });
 });
 
-/**
- * The regression that matters most.
- *
- * The previous fee sweep posted a ledger entry and moved nothing, so `pool_addr`
- * fell while the coins stayed put — the exact mismatch `ExternalReconciler`
- * treats as theft. Running it and then enabling the reconciler would trip the
- * circuit breaker and freeze every withdrawal.
- */
 describe("a collected fee leaves the ledger and the chain in agreement", () => {
   const enumerator = {
     async poolGroups() {
@@ -156,9 +139,8 @@ describe("a collected fee leaves the ledger and the chain in agreement", () => {
     const leg = plan.legs[0];
     if (!leg) throw new Error("expected a fee leg");
 
-    // The transfer lands...
     onChain[leg.address] = (onChain[leg.address] ?? 0n) - leg.amountBaseUnits;
-    // ...and only then does the ledger follow.
+
     const { feeSwept } = await import("@/ledger");
     await ledger.post(
       feeSwept({
@@ -185,7 +167,6 @@ describe("a collected fee leaves the ledger and the chain in agreement", () => {
   it("trips the breaker if the ledger moves without the coins — the old behaviour", async () => {
     await deposit(0, 10_000_000n, 50);
 
-    // Book-only: post the entry, move nothing on chain.
     const { feeSwept } = await import("@/ledger");
     await ledger.post(
       feeSwept({

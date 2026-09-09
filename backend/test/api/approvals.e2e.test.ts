@@ -4,14 +4,6 @@ import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types
 import { describe, expect, it } from "vitest";
 import { DEST, auth, makeApi } from "./harness.js";
 
-/**
- * Dual control on money-out (build spec §7.4, §16).
- *
- * The property being defended: above the threshold, a payout needs M *distinct*
- * operators, and the one who asked for it is never one of them. Before this
- * existed the policy engine returned 202 and there was no endpoint to complete
- * the payout — the money path dead-ended.
- */
 const approvalPolicy = (required: number) =>
   new PolicyEngine({
     maxPerPayoutBaseUnits: 1_000_000_000n,
@@ -36,8 +28,6 @@ async function setup(required = 1) {
   });
   const accountId = account.json().id as string;
 
-  // A pool address to gather from — without one the payout fails on funds (409)
-  // before policy ever gets to hold it.
   await ctx.app.inject({
     method: "POST",
     url: `/v1/accounts/${accountId}/deposit-addresses`,
@@ -45,7 +35,6 @@ async function setup(required = 1) {
     payload: { chain: "TRON", asset: "USDT" },
   });
 
-  // Fund the merchant so the payout is held by policy, not short of balance.
   await ctx.engine.ledger.post(
     depositFinalized({
       id: JournalEntryId("seed"),
@@ -80,14 +69,13 @@ describe("payout approvals (§7.4)", () => {
     expect(body.withdrawalId).toMatch(/^[0-9a-f-]{36}$/);
     expect(body.approvalsNeeded).toBe(1);
     expect(body.approvalsHave).toBe(0);
-    expect(ctx.broadcaster.sent).toHaveLength(0); // nothing moved
+    expect(ctx.broadcaster.sent).toHaveLength(0);
   });
 
   it("settles once a DIFFERENT credential approves", async () => {
     const ctx = await setup();
     const held = (await request(ctx, "w1")).json();
 
-    // A second key on the same tenant — a distinct operator identity.
     const approverKey = await ctx.engine.tenants.issueKey(ctx.tenant.id, ["approve"]);
     const res = await ctx.app.inject({
       method: "POST",
@@ -98,14 +86,13 @@ describe("payout approvals (§7.4)", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().status).toBe("settled");
     expect(res.json().txId).toBeTruthy();
-    expect(ctx.broadcaster.sent).toHaveLength(1); // exactly one on-chain transfer
+    expect(ctx.broadcaster.sent).toHaveLength(1);
   });
 
   it("refuses the requester approving their own payout", async () => {
     const ctx = await setup();
     const held = (await request(ctx, "w1")).json();
 
-    // Same key that requested it — the whole point of separation of duties.
     const res = await ctx.app.inject({
       method: "POST",
       url: `/v1/withdrawals/${held.withdrawalId}/approve`,
@@ -130,7 +117,6 @@ describe("payout approvals (§7.4)", () => {
     expect(once.statusCode).toBe(202);
     expect(once.json().approvalsHave).toBe(1);
 
-    // Same approver again — recorded once, so still short of quorum.
     const twice = await ctx.app.inject({
       method: "POST",
       url: `/v1/withdrawals/${held.withdrawalId}/approve`,
@@ -140,7 +126,6 @@ describe("payout approvals (§7.4)", () => {
     expect(twice.json().approvalsHave).toBe(1);
     expect(ctx.broadcaster.sent).toHaveLength(0);
 
-    // A genuinely second operator completes it.
     const second = await ctx.engine.tenants.issueKey(ctx.tenant.id, ["approve"]);
     const done = await ctx.app.inject({
       method: "POST",
@@ -215,8 +200,7 @@ describe("API key scopes (§16)", () => {
       headers: { ...auth(approveOnly), "idempotency-key": "w-approve-only" },
       payload: withdraw(),
     });
-    // If approve implied move-funds, one credential could request AND sign off,
-    // and dual control would be decorative.
+
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe("FORBIDDEN_SCOPE");
   });

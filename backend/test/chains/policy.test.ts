@@ -2,9 +2,9 @@ import {
   DenylistSanctionsScreener,
   FlagKillSwitch,
   InMemoryVelocityLimiter,
-  PolicyDeniedError,
   PolicyEngine,
 } from "@/chains/payout/policy.js";
+import { PolicyDeniedError } from "@/common";
 import { describe, expect, it } from "vitest";
 
 const DEST = "TDestination0000000000000000000000";
@@ -86,15 +86,12 @@ describe("payout policy guard — velocity", () => {
       }),
     });
 
-    // Two 100-USDT payouts fit (200 ≤ 250); the third (→ 300) breaches.
     await expect(engine.check(ctx(), now)).resolves.toBeUndefined();
     await expect(engine.check(ctx(), now)).resolves.toBeUndefined();
     await expect(engine.check(ctx(), now)).rejects.toThrow(/velocity/);
 
-    // A different merchant has its own budget.
     await expect(engine.check(ctx({ merchant: "m2" }), now)).resolves.toBeUndefined();
 
-    // Past the window, the earlier spend has aged out — m1 can pay again.
     const later = new Date(now.getTime() + 61 * 60_000);
     await expect(engine.check(ctx(), later)).resolves.toBeUndefined();
   });

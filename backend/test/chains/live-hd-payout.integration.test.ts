@@ -1,21 +1,20 @@
 import { FetchHttpClient } from "@/chains/http.js";
-import { PayoutService } from "@/chains/payout/payout-service.js";
+import { LEDGER_SCHEMA_SQL } from "@/schemas/sql";
+import { LedgerService, PayoutService } from "@/services";
+import { SqlLedgerStore } from "@/stores";
+
 import { PolicyEngine } from "@/chains/payout/policy.js";
 import { TronPayoutBroadcaster } from "@/chains/payout/tron-broadcaster.js";
 import { RawTronSigner } from "@/chains/tron/raw-tron-signer.js";
 import { makeTronSigner } from "@/chains/tron/tron-signer.js";
-import { LEDGER_SCHEMA_SQL, LedgerService, SqlLedgerStore, depositFinalized } from "@/ledger";
-import type { SqlClient } from "@/ledger";
-import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey } from "@/types";
+import { depositFinalized } from "@/ledger";
+
+import { Asset, IdempotencyKey, JournalEntryId, LedgerAccountKey, type SqlClient } from "@/types";
 import { HDKey } from "@scure/bip32";
 import { freshDatabase } from "@test/support/index.js";
 import { describe, expect, it } from "vitest";
 import { fundedGatherer } from "./pool-fixture.js";
 
-// The production-shaped money-out, LIVE: a payout signed by an HD-DERIVED pool
-// key (KeypairSigner), not a raw key. Steps: derive pool address P0 from a test
-// engine xprv → fund it with native TRX from the hot wallet → pay TRX out of P0,
-// signed by the pool signer at its index. Gated on CIXTECH_LIVE_HD + TRON_PK.
 const PK = process.env["TRON_PK"];
 const RUN = process.env["CIXTECH_LIVE_HD"] && PK;
 const NILE = "https://nile.trongrid.io";
@@ -24,7 +23,6 @@ const TRX = Asset("TRX");
 const AVAILABLE = LedgerAccountKey("merchant_available:t1:m1");
 const POOL = LedgerAccountKey("pool_addr:TRON:m1");
 
-// A throwaway engine seed (testnet only) → account xprv the pool derives from.
 const ENGINE_XPRV = HDKey.fromMasterSeed(
   Uint8Array.from(Buffer.from("cafe".repeat(16), "hex")),
 ).derive("m/44'/195'/0'").privateExtendedKey;
@@ -51,7 +49,6 @@ describe.skipIf(!RUN)("LIVE HD pool-key payout (gated on CIXTECH_LIVE_HD)", () =
     const p0 = poolSigner.deriveAddress(0);
     const hotSigner = new RawTronSigner(PK as string);
 
-    // 1. Fund P0 with native TRX from the hot wallet (enough for payout + bandwidth).
     const funder = new TronPayoutBroadcaster(http, hotSigner, {
       baseUrl: NILE,
       tokenContracts: {},
@@ -67,7 +64,6 @@ describe.skipIf(!RUN)("LIVE HD pool-key payout (gated on CIXTECH_LIVE_HD)", () =
     console.log(`FUND P0=${p0} TXID=${fund.txId}`);
     await waitForAtLeast(p0, 10_000_000n);
 
-    // 2. Pay TRX out of P0, signed by the HD pool key at index 0.
     const db = await freshDatabase();
     await db.exec(LEDGER_SCHEMA_SQL);
     const sql = db.sql;
@@ -111,7 +107,7 @@ describe.skipIf(!RUN)("LIVE HD pool-key payout (gated on CIXTECH_LIVE_HD)", () =
     });
 
     expect(res.txId).toMatch(/^[0-9a-f]{64}$/);
-    expect(res.from).toBe(p0); // paid FROM the HD-derived pool address
+    expect(res.from).toBe(p0);
     console.log(
       `HD PAYOUT 5 TRX from ${p0} TXID=${res.txId}  (https://nile.tronscan.org/#/transaction/${res.txId})`,
     );

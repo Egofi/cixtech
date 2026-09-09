@@ -1,16 +1,15 @@
+import { BadContributionError } from "@/common";
 import { dealerlessDkg, verifyShare } from "@/mpc/dealerless-dkg.js";
 import { combine, scalarToBytes } from "@/mpc/shamir.js";
-import { BadContributionError, thresholdSignerFromShares } from "@/mpc/threshold-signer.js";
+import { thresholdSignerFromShares } from "@/mpc/threshold-signer.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { describe, expect, it } from "vitest";
 
 describe("dealerless DKG + verifiable secret sharing", () => {
   it("produces a group key nobody chose, reconstructable from a threshold of shares", () => {
     const { shares, publicKey, commitments } = dealerlessDkg(3, 5);
-    expect(commitments).toHaveLength(3); // one per polynomial coefficient
+    expect(commitments).toHaveLength(3);
 
-    // A threshold of the summed shares reconstructs a secret whose public key is
-    // exactly the DKG's — i.e. the group key is Σ of the participants' secrets.
     const secret = combine(shares.slice(0, 3).map((s) => s.share));
     expect(Buffer.from(secp256k1.getPublicKey(scalarToBytes(secret), true)).toString("hex")).toBe(
       Buffer.from(publicKey).toString("hex"),
@@ -39,7 +38,7 @@ describe("dealerless DKG + verifiable secret sharing", () => {
 
   it("a signer given the VSS commitments rejects a corrupted contribution", () => {
     const { shares, publicKey, commitments } = dealerlessDkg(3, 5);
-    // Corrupt the first node's share; the Feldman check must catch it at sign time.
+
     const first = shares[0] as (typeof shares)[number];
     const tampered = [
       { ...first, share: { ...first.share, y: first.share.y + 1n } },

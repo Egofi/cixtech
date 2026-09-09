@@ -1,4 +1,5 @@
-import { ORDER, type Share, combine, invMod, randomScalar, refresh, split } from "@/mpc/shamir.js";
+import { ORDER, combine, invMod, randomScalar, refresh, split } from "@/mpc/shamir.js";
+import type { Share } from "@/types";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
@@ -18,10 +19,9 @@ describe("Shamir sharing over the secp256k1 scalar field", () => {
         const secret = randomScalar();
         const shares = split(secret, t, n);
 
-        // Every distinct t-subset recovers it exactly.
         expect(combine(shares.slice(0, t))).toBe(secret);
         expect(combine(shares.slice(n - t))).toBe(secret);
-        // t-1 shares do not (they interpolate a different value at 0).
+
         if (t >= 2) expect(combine(shares.slice(0, t - 1))).not.toBe(secret);
       }),
     );
@@ -34,9 +34,8 @@ describe("Shamir sharing over the secp256k1 scalar field", () => {
     const oldShares = split(secret, t, n);
     const newShares = refresh(oldShares, t);
 
-    // New epoch still reconstructs the same key.
     expect(combine(newShares.slice(0, t))).toBe(secret);
-    // Mixing old and new epoch shares does NOT (forces same-epoch compromise).
+
     const mixed = [oldShares[0], oldShares[1], newShares[2]] as Share[];
     expect(combine(mixed)).not.toBe(secret);
   });

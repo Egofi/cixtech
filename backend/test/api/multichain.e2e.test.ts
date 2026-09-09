@@ -1,12 +1,6 @@
 import type { AddressBalance } from "@/attribution";
-import {
-  type BroadcastResult,
-  type ChainPlugin,
-  type PayoutBroadcaster,
-  type PayoutRequest,
-  PolicyEngine,
-  deriveEvmAddress,
-} from "@/chains";
+import { type ChainPlugin, type PayoutBroadcaster, PolicyEngine, deriveEvmAddress } from "@/chains";
+import type { BroadcastResult, PayoutRequest } from "@/types";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { auth, makeApi } from "./harness.js";
@@ -19,7 +13,6 @@ const plentiful: AddressBalance = {
   },
 };
 
-/** A fake BASE (EVM) plugin with a recording broadcaster so we can assert routing. */
 function baseChain(): ChainPlugin & { sent: PayoutRequest[] } {
   const sent: PayoutRequest[] = [];
   const broadcaster: PayoutBroadcaster = {
@@ -111,7 +104,6 @@ describe("multi-chain engine (ADR 0016)", () => {
     });
     const accountId = await createAccount(ctx.app, ctx.apiKey);
 
-    // Assign a BASE deposit address and credit a USDC deposit to it.
     const addr = await ctx.app.inject({
       method: "POST",
       url: `/v1/accounts/${accountId}/deposit-addresses`,
@@ -138,7 +130,6 @@ describe("multi-chain engine (ADR 0016)", () => {
     expect(pay.statusCode).toBe(200);
     expect(pay.json().from).toBe(address);
 
-    // The BASE broadcaster handled it; the default TRON one never saw it.
     expect(base.sent).toHaveLength(1);
     expect(base.sent[0]?.chain).toBe("BASE");
     expect(ctx.broadcaster.sent).toHaveLength(0);

@@ -1,20 +1,8 @@
-import {
-  type AuthorizationSigner,
-  InvalidAuthorizationError,
-  transferCommitment,
-} from "./authorization.js";
-import type { BroadcastResult, PayoutBroadcaster, PayoutRequest } from "./broadcaster.js";
+import { InvalidAuthorizationError } from "@/common";
+import type { BroadcastResult, PayoutRequest } from "@/types";
+import { type AuthorizationSigner, transferCommitment } from "./authorization.js";
+import type { PayoutBroadcaster } from "./broadcaster.js";
 
-/**
- * The signing-boundary gate (ADR 0007's "last mile verifies what it can evaluate
- * independently"). Wraps any `PayoutBroadcaster` and, before delegating, re-verifies
- * the authorization token INDEPENDENTLY: the HMAC under the policy key, the expiry,
- * and — the load-bearing check — that the token's sighash commitment matches the
- * transfer actually about to be sent (amount, destination, from). A compromised
- * coordinator that swaps the destination or amount produces a mismatch and is
- * refused here, before any signing. A request with no authorization is rejected in
- * `require` mode.
- */
 export class AuthorizingBroadcaster implements PayoutBroadcaster {
   constructor(
     private readonly inner: PayoutBroadcaster,
@@ -40,7 +28,7 @@ export class AuthorizingBroadcaster implements PayoutBroadcaster {
       destination: req.toAddress,
       fromAddress: req.fromAddress,
     });
-    // Throws InvalidAuthorizationError on a bad/expired/mismatched token.
+
     this.authorizer.verify(req.authorization, { expectedSighash });
     return this.inner.send(req);
   }

@@ -2,19 +2,19 @@ import { buildApp } from "@/api/app.js";
 import { buildEngine } from "@/api/engine.js";
 import { applySchemas } from "@/api/sql.js";
 import { tenantScopedSql } from "@/api/tenant-scope.js";
-import type { WebhookPoster } from "@/api/webhooks.js";
+import { SqlKillSwitch } from "@/stores";
+import type { BroadcastResult, PayoutRequest, SqlClient } from "@/types";
+
 import type { AddressBalance } from "@/attribution";
 import {
-  type BroadcastResult,
   ChainRouter,
   type DepositSource,
   type PayoutBroadcaster,
-  type PayoutRequest,
   PolicyEngine,
-  SqlKillSwitch,
+  type WebhookPoster,
   deriveTronAddress,
 } from "@/chains";
-import type { SqlClient } from "@/ledger";
+
 import { HDKey } from "@scure/bip32";
 import { freshDatabase } from "@test/support/index.js";
 
@@ -52,21 +52,16 @@ export interface Overrides {
   webhookPoster?: WebhookPoster;
   policy?: PolicyEngine;
   adminToken?: string;
-  /** Extra chain plugins to register beyond the default TRON fake (for multi-chain tests). */
+
   extraChains?: ConstructorParameters<typeof ChainRouter>[0];
-  /**
-   * Wrap the raw client BEFORE the tenant scope wraps it, so a test can observe
-   * the statements the engine actually issues — including the `set_config` that
-   * binds row-level security.
-   */
+
   wrapSql?: (sql: SqlClient) => SqlClient;
-  /** Browser origins allowed to call the API (the consoles' static hosts). */
+
   corsOrigins?: readonly string[];
 }
 
 export const ADMIN_TOKEN = "test-admin-token";
 
-/** A one-chain (or more) router of fakes, mirroring how prod wires the real router. */
 function fakeRouter(o: Overrides, broadcaster: PayoutBroadcaster): ChainRouter {
   const router = new ChainRouter([
     {
@@ -83,11 +78,9 @@ function fakeRouter(o: Overrides, broadcaster: PayoutBroadcaster): ChainRouter {
   return router;
 }
 
-/** Build a full API + engine on a fresh Postgres schema, with overridable chain edges. */
 export async function makeApi(o: Overrides = {}) {
   const db = await freshDatabase();
-  // Mirrors production wiring: the engine sees the tenant-scoped client, so the
-  // RLS GUC is bound on every authenticated request (§13) in tests too.
+
   await applySchemas(db.sql);
   const sql = tenantScopedSql(o.wrapSql ? o.wrapSql(db.sql) : db.sql);
   const broadcaster = new FakeBroadcaster();
@@ -99,8 +92,7 @@ export async function makeApi(o: Overrides = {}) {
       new PolicyEngine({
         maxPerPayoutBaseUnits: 1_000_000_000n,
         allowlist: new Set([DEST]),
-        // Same durable kill-switch the admin console toggles, so admin controls
-        // actually gate tenant payouts (mirrors production wiring).
+
         killSwitch: new SqlKillSwitch(sql),
       }),
     webhookPoster: o.webhookPoster ?? noopPoster,

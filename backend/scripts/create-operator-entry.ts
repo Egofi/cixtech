@@ -2,13 +2,6 @@ import { openDatabase } from "@/api/db.js";
 import { AuthStore, requiresTotp } from "@/auth";
 import type { PrincipalKind } from "@/auth";
 
-/**
- * The database-side half of `pnpm create-operator`.
- *
- * Kept as TypeScript and bundled by the same pipeline the server uses, so the
- * account this creates is created by exactly the code that will later
- * authenticate it — password parameters, role validation and all.
- */
 export async function createOperator(input: {
   kind: string;
   email: string;

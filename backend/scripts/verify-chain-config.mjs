@@ -1,23 +1,3 @@
-/**
- * Check every configured chain against the chain itself.
- *
- *   node scripts/verify-chain-config.mjs        # or: make verify-chains
- *
- * Chain IDs and token contracts are the two values you cannot safely take from
- * a blog post, a search result or an address aggregator. A wrong chain ID makes
- * signatures invalid on the network you meant; a wrong token contract is worse,
- * because it fails QUIETLY — the engine credits deposits of a token it does not
- * control, or reads a real balance as zero and refuses payouts whose funds are
- * sitting in the pool address.
- *
- * So this asks the network. `eth_chainId` is authoritative for the chain id, and
- * `symbol()` / `decimals()` on the contract are authoritative for what the token
- * actually is. Get the candidate address from the ISSUER (Circle for USDC,
- * Tether for USDT) or the chain's own bridge documentation, put it in .env, and
- * run this before it ever sees value.
- *
- * Exits non-zero on any mismatch, so it can gate a deploy.
- */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,13 +15,6 @@ const C = {
   bold: "\x1b[1m",
 };
 
-/**
- * Strip a trailing `# comment` from an unquoted value.
- *
- * Only when the `#` is preceded by whitespace, and never inside quotes — a
- * database password may legitimately contain a `#`, and silently truncating one
- * produces an authentication failure nobody can explain from the file.
- */
 function stripInlineComment(raw) {
   const v = raw.trim();
   if (v.startsWith('"') || v.startsWith("'")) {
@@ -52,7 +25,6 @@ function stripInlineComment(raw) {
   return v.replace(/\s+#.*$/, "").trim();
 }
 
-/** Same precedence the dev runner uses: real env wins, then .env.dev, then .env. */
 function loadEnv() {
   for (const file of [resolve(repoRoot, ".env.dev"), resolve(repoRoot, ".env")]) {
     if (!existsSync(file)) continue;
@@ -69,8 +41,6 @@ function loadEnv() {
   }
 }
 
-/** The expected shape, mirroring packages/chain-config. Kept as data, not imported,
- *  so this script runs without a build step. */
 const EXPECTED = {
   testnet: {
     ETHEREUM: 11155111,
@@ -106,7 +76,6 @@ async function rpc(url, method, params = []) {
   return body.result;
 }
 
-/** ERC-20 `symbol()` returns a dynamic string: [offset][length][utf8 bytes]. */
 function decodeString(hex) {
   const data = hex.replace(/^0x/, "");
   if (data.length < 128) return null;
@@ -148,7 +117,6 @@ async function verifyEvmChain(chain, url, env, results) {
       continue;
     }
     try {
-      // symbol() = 0x95d89b41, decimals() = 0x313ce567
       const [symHex, decHex] = await Promise.all([
         rpc(url, "eth_call", [{ to: address, data: "0x95d89b41" }, "latest"]),
         rpc(url, "eth_call", [{ to: address, data: "0x313ce567" }, "latest"]),

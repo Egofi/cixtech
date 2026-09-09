@@ -20,7 +20,6 @@ describe("live HTTP server", () => {
     expect(health.status).toBe(200);
     expect(await health.json()).toEqual({ status: "ok" });
 
-    // Unauthenticated → 401 over the wire.
     const noAuth = await fetch(`${base}/v1/accounts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -28,7 +27,6 @@ describe("live HTTP server", () => {
     });
     expect(noAuth.status).toBe(401);
 
-    // Authenticated create-account → 201 with an id.
     const created = await fetch(`${base}/v1/accounts`, {
       method: "POST",
       headers: { "content-type": "application/json", ...auth(apiKey) },

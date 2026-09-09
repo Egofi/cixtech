@@ -37,8 +37,7 @@ export default function Payouts() {
     if (!base || base === "0") {
       setNotice({
         tone: "bad",
-        // Being specific matters: the usual cause is more decimal places than the
-        // asset has, and "invalid amount" sends people looking at the wrong thing.
+
         text: `“${form.amount}” is not a valid ${form.asset} amount. Check the number of decimal places.`,
       });
       return;
@@ -46,7 +45,6 @@ export default function Payouts() {
     setBusy(true);
     setNotice(null);
     try {
-      // The idempotency key makes a retry safe: one on-chain transfer, ever.
       const key = crypto.randomUUID();
       const res = await portal.post<{ txId?: string } & Partial<HeldWithdrawal>>(
         `/v1/accounts/${form.account}/withdrawals`,

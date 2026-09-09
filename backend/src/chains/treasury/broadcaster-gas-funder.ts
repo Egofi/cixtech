@@ -5,38 +5,15 @@ import { mintInternalAuthorization } from "../payout/internal-authorization.js";
 import type { GasFunder } from "./gas-station.js";
 
 export interface BroadcasterGasFunderConfig {
-  /** Native gas asset symbol per chain (POL / BNB / ETH / TRX). */
   nativeAssetOf: (chain: string) => string;
-  /**
-   * The treasury address that pays for gas, and the Signer index controlling it.
-   * Kept separate from the pool key domain: this spends engine funds, not
-   * customer funds.
-   */
+
   treasuryOf: (chain: string) => { address: string; derivationIndex: number } | undefined;
-  /**
-   * Top up to this multiple of the requested minimum, so a pool address is not
-   * re-funded on every single payout. Default 1 (exact).
-   */
+
   topUpMultiple?: bigint;
-  /**
-   * Mints the authorization token for the funding transfer (§7). Required whenever
-   * the broadcaster is the authorizing one — which is every deployment with a
-   * policy key — because a transfer with no token is refused at the signing
-   * boundary. Absent only where no policy key is configured.
-   */
+
   authorizer?: AuthorizationSigner;
 }
 
-/**
- * Funds a pool address with native gas by sending it a plain native transfer from
- * the treasury (build spec §6.2, "fund-then-transfer").
- *
- * Idempotency is the delicate part. The broadcaster dedupes on `idempotencyKey`,
- * so a retried payout leg reuses the original funding transfer rather than sending
- * a second one. The balance check in front of it is an optimisation, not the
- * safety property — two concurrent attempts could both observe a low balance, and
- * it is the shared key that stops them both spending.
- */
 export class BroadcasterGasFunder implements GasFunder {
   constructor(
     private readonly broadcaster: PayoutBroadcaster,

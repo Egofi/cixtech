@@ -1,17 +1,3 @@
-/**
- * Plain language for the engine's internal identifiers.
- *
- * Ledger account keys and entry kinds are machine identifiers —
- * `merchant_available:<tenant>:<account>`, `deposit.finalized`. A non-technical
- * operator reading a console needs "Merchant balance" and "Deposit received",
- * with the raw key still available underneath (on hover, or in a monospace
- * column) so an engineer can still grep for it.
- *
- * These maps are product copy carried over verbatim from the previous consoles.
- * Changing a string here changes what an operator sees during an incident, so
- * treat them as text, not as constants to tidy.
- */
-
 const ACCOUNT_NAMES: Record<string, string> = {
   merchant_available: "Merchant balance",
   merchant_pending: "Merchant pending",
@@ -56,21 +42,18 @@ export function titleize(s: string): string {
   return v ? v.charAt(0).toUpperCase() + v.slice(1) : "";
 }
 
-/** A ledger account key as something a person reads. */
 export function accountName(key: string | null | undefined): string {
   const parts = String(key ?? "").split(":");
   const prefix = parts[0] ?? "";
   let name = ACCOUNT_NAMES[prefix];
 
   if (!name) {
-    // The prefix often already names the fee ("egofi_fee_revenue"), so append only
-    // the suffix rather than re-stating it.
     if (/_revenue$/.test(prefix)) name = `${titleize(prefix.replace(/_revenue$/, ""))} revenue`;
     else if (/_expense$/.test(prefix))
       name = `${titleize(prefix.replace(/_expense$/, ""))} expense`;
     else name = titleize(prefix);
   }
-  // pool_addr keys carry the chain in slot 1; it is the useful half of the tail.
+
   if (prefix.startsWith("pool_addr") && parts[1]) name += ` · ${parts[1]}`;
   return name;
 }
@@ -89,7 +72,6 @@ export function statusLabel(status: string | null | undefined): string {
 
 export type Tone = "ok" | "bad" | "warn" | "muted";
 
-/** The tone a status should be shown in — green, red, amber, or quiet. */
 export function statusTone(status: string | null | undefined): Tone {
   const s = String(status ?? "");
   if (["settled", "delivered", "AVAILABLE", "ok"].includes(s)) return "ok";
@@ -98,7 +80,6 @@ export function statusTone(status: string | null | undefined): Tone {
   return "muted";
 }
 
-/** The tone an entry kind should be shown in. */
 export function kindTone(kind: string | null | undefined): Tone {
   const k = String(kind ?? "");
   if (k.startsWith("reverse") || k.includes("reorged")) return "bad";

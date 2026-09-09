@@ -7,5 +7,5 @@
   // HTTP adapter, which cannot compile under it, still gets typechecked.
   "extends": "./tsconfig.base.json",
   "include": ["src/**/*.ts", "types/**/*.ts"],
-  "exclude": ["node_modules", "dist", "src/api/**"]
+  "exclude": ["node_modules", "dist", "src/api/**", "src/schemas/http/**"]
 }

@@ -6,14 +6,14 @@ import { describe, expect, it } from "vitest";
 describe("row-level security (§13)", () => {
   it("applySchemas leaves every tenant-scoped table with an RLS policy (boot check passes)", async () => {
     const sql = (await freshDatabase()).sql;
-    await applySchemas(sql); // runs assertTenantTablesProtected internally — throws if any table is unprotected
+    await applySchemas(sql);
     await expect(assertTenantTablesProtected(sql)).resolves.toBeUndefined();
   });
 
   it("FAILS the boot check when a tenant-scoped table has no policy", async () => {
     const sql = (await freshDatabase()).sql;
     await applySchemas(sql);
-    // Introduce a new tenant-scoped table with NO policy — exactly what §13 forbids.
+
     await sql.exec("CREATE TABLE rogue_ledger (id text PRIMARY KEY, tenant_id text NOT NULL);");
     await expect(assertTenantTablesProtected(sql)).rejects.toThrow(/rogue_ledger/);
   });
@@ -35,8 +35,7 @@ describe("row-level security (§13)", () => {
         [table],
       );
       expect(enabled.rows[0]?.relrowsecurity, `RLS enabled on ${table}`).toBe(true);
-      // FORCE is what makes the policy apply to the owning role too — without it
-      // the whole layer is inert on managed Postgres (ADR 0013).
+
       expect(enabled.rows[0]?.relforcerowsecurity, `RLS forced on ${table}`).toBe(true);
       const policies = await sql.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM pg_policies WHERE tablename = $1 AND schemaname = current_schema()",

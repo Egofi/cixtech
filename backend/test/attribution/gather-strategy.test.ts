@@ -1,16 +1,14 @@
 import { EoaFundTransferStrategy } from "@/attribution/eoa-gather-strategy.js";
-import { GATHER_CONFIG_SCHEMA_SQL, GatherConfigStore } from "@/attribution/gather-config.js";
-import {
-  type GatherStrategy,
-  type GatherStrategyKind,
-  GatherStrategyNotSupportedError,
-  GatherStrategyRegistry,
-  UnknownGatherStrategyError,
-} from "@/attribution/gather-strategy.js";
+import { GatherConfigStore } from "@/attribution/gather-config.js";
+import type { GatherStrategy } from "@/attribution/gather-strategy.js";
+import { GatherStrategyRegistry } from "@/attribution/gather-strategy.js";
 import { PoolGatherer } from "@/attribution/pool-gatherer.js";
 import { PoolManager } from "@/attribution/pool-manager.js";
-import { POOL_SCHEMA_SQL } from "@/attribution/pool-store.js";
-import { SqlPoolStore } from "@/attribution/sql-pool-store.js";
+import { GATHER_CONFIG_SCHEMA_SQL, POOL_SCHEMA_SQL } from "@/schemas/sql";
+import { SqlPoolStore } from "@/stores";
+import type { GatherStrategyKind } from "@/types";
+
+import { GatherStrategyNotSupportedError, UnknownGatherStrategyError } from "@/common";
 import { freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import { fakeDerive } from "./postgres.js";
@@ -19,7 +17,6 @@ const T = "t1";
 const M = "m1";
 const CHAIN = "TRON";
 
-/** A stand-in strategy whose addresses are distinguishable by prefix. */
 const fake = (kind: GatherStrategyKind): GatherStrategy & { prepared: string[] } => {
   const prepared: string[] = [];
   return {
@@ -63,11 +60,6 @@ describe("GatherStrategy — per-address dispatch (ADR 0011)", () => {
     expect(rows[0]?.gatherStrategy).toBe("EOA_FUND_TRANSFER");
   });
 
-  /**
-   * The failure mode the whole ADR exists to prevent. Flipping the toggle must
-   * change only what NEW addresses become; an already-funded address has to keep
-   * draining under the mechanism that created it, or its balance is unreachable.
-   */
   it("keeps draining an existing address under its ORIGINAL strategy after the toggle flips", async () => {
     const db = await freshDatabase(POOL_SCHEMA_SQL);
     let active: GatherStrategyKind = "EOA_FUND_TRANSFER";
@@ -81,17 +73,16 @@ describe("GatherStrategy — per-address dispatch (ADR 0011)", () => {
     await pool.markInUse(CHAIN, old);
     await pool.cool(CHAIN, old);
 
-    active = "FORWARDER"; // forward-only cutover
+    active = "FORWARDER";
     const minted = await pool.assign(T, M, CHAIN, "inv-2", "xpub");
     expect(minted).not.toBe(old);
 
     const byAddress = new Map(
       (await pool.addressesForMerchant(T, M, CHAIN)).map((r) => [r.address, r.gatherStrategy]),
     );
-    expect(byAddress.get(old)).toBe("EOA_FUND_TRANSFER"); // NOT retagged
+    expect(byAddress.get(old)).toBe("EOA_FUND_TRANSFER");
     expect(byAddress.get(minted)).toBe("FORWARDER");
 
-    // The funded legacy address is still gathered under the old strategy.
     const legs = await new PoolGatherer(pool, {
       async balance(_c, address) {
         return address === old ? 500n : 0n;
@@ -104,7 +95,7 @@ describe("GatherStrategy — per-address dispatch (ADR 0011)", () => {
   it("refuses to drain an address whose strategy has no implementation, rather than substituting one", () => {
     const registry = new GatherStrategyRegistry([fake("EOA_FUND_TRANSFER")]);
     expect(() => registry.forAddress("FORWARDER")).toThrow(UnknownGatherStrategyError);
-    // Silently falling back would build a transaction that cannot move the funds.
+
     expect(registry.forAddress("EOA_FUND_TRANSFER").kind).toBe("EOA_FUND_TRANSFER");
   });
 });
@@ -162,7 +153,7 @@ describe("GatherConfig — the toggle (ADR 0011)", () => {
         approvedBy: "sec",
       }),
     ).rejects.toThrow(GatherStrategyNotSupportedError);
-    // The same strategy is fine on an EVM chain.
+
     await expect(
       cfg.setActive({
         chain: "BASE",
@@ -255,7 +246,6 @@ describe("EoaFundTransferStrategy — gas provisioning (build spec §6.2)", () =
         amountBaseUnits: 100n,
         idempotencyKey: "intent-1",
       }),
-      // Silently proceeding would broadcast a transfer that reverts for gas.
     ).rejects.toThrow(/no gas provisioner is configured/);
   });
 });

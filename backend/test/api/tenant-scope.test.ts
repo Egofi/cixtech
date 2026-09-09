@@ -1,11 +1,11 @@
 import { applySchemas } from "@/api/sql.js";
 import { currentTenantId, runAsTenant, tenantScopedSql } from "@/api/tenant-scope.js";
-import type { SqlClient } from "@/ledger";
+import type { SqlClient } from "@/types";
+
 import { freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import { adminAuth, auth, makeApi } from "./harness.js";
 
-/** Records the tenant id every `set_config('cixtech.tenant', …)` binds. */
 function recorder() {
   const bound: string[] = [];
   const wrap = (inner: SqlClient): SqlClient => ({
@@ -28,8 +28,6 @@ describe("row-level security is actually engaged on a request (§13)", () => {
     const res = await app.inject({ method: "GET", url: "/v1/balances", headers: auth(apiKey) });
     expect(res.statusCode).toBe(200);
 
-    // Before the scope hook existed this array was empty on every request: the
-    // GUC was never set, so every policy's "unset" clause matched everything.
     expect(rec.bound.length).toBeGreaterThan(0);
     expect(new Set(rec.bound)).toEqual(new Set([tenant.id]));
   });
@@ -88,7 +86,7 @@ describe("row-level security is actually engaged on a request (§13)", () => {
       app.inject({ method: "GET", url: "/v1/deposits", headers: auth(apiKey) }),
       app.inject({ method: "GET", url: "/v1/deposits", headers: auth(other.apiKey) }),
     ]);
-    // Each tenant's binding appeared, and neither request bound the other's id.
+
     expect(Object.keys(seen).sort()).toEqual([tenant.id, other.tenant.id].sort());
   });
 });
@@ -97,8 +95,6 @@ describe("with a role that RLS actually constrains", () => {
   let db: Awaited<ReturnType<typeof freshDatabase>>;
   let scoped: ReturnType<typeof tenantScopedSql>;
 
-  // beforeEach, not beforeAll: the shared test setup closes every open database
-  // handle after each test, so a handle opened once would be dead by the second.
   beforeEach(async () => {
     db = await freshDatabase();
     await applySchemas(db.sql);
@@ -110,8 +106,6 @@ describe("with a role that RLS actually constrains", () => {
   });
 
   it("hides another tenant's rows from a scoped read, and shows them to an unscoped one", async () => {
-    // This is the property the audit found missing: the predicate is NOT in the
-    // query, and isolation still holds because the policy is bound.
     const asA = await runAsTenant("tenant-a", () =>
       scoped.query<{ tenant_id: string }>("SELECT tenant_id FROM account"),
     );
@@ -122,7 +116,6 @@ describe("with a role that RLS actually constrains", () => {
     );
     expect(asB.rows.map((r) => r.tenant_id)).toEqual(["tenant-b"]);
 
-    // The control plane, with no tenant in context, still spans both.
     const all = await scoped.query<{ tenant_id: string }>("SELECT tenant_id FROM account");
     expect(all.rows.map((r) => r.tenant_id).sort()).toEqual(["tenant-a", "tenant-b"]);
   });

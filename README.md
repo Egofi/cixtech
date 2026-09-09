@@ -85,8 +85,38 @@ pnpm dev:worker               # worker   :3001   (needs REDIS_URL)
 | `make test PKG=ledger` | one module's tests |
 | `pnpm build` | → `dist/{api,worker,migrate}.mjs` |
 | `pnpm verify:chains` | ask each chain to confirm its own config |
+| `pnpm db:types` | regenerate `types/ports/db.ts` from `src/schemas/sql` |
 | `pnpm rotate-admin-token` | rotate the admin token |
 | `make urls` | print every browsable endpoint |
+
+### Where things live
+
+```
+backend/src/
+  services/      business logic          admin, portal, payout, fee-sweep, ledger
+  stores/        database adapters       tenant, auth, pool, approval, policy, ledger
+  schemas/sql/   every CREATE TABLE
+  schemas/http/  request validation
+  common/        errors/  exceptions/  routes/
+  chains/        per-chain adapters      tron/ evm/ payout/ ingest/ treasury/
+  ledger/        double-entry core + LedgerStore port
+  attribution/   deposit pools + PoolStore port
+  api/           HTTP wiring, composition roots, migrations
+  worker/        BullMQ jobs
+backend/types/
+  models/        data shapes, one file per domain + branded ids/money
+  enums/         AccountType, Scope
+  ports/         SqlClient
+  errorTypes/    error codes      routeTypes/  route access shapes
+```
+
+One rule per kind: `<name>.service.ts`, `<name>.store.ts`, `<name>.schema.ts`.
+Route paths are declared only in `common/routes/`, error codes only in
+`types/errorTypes/`, and each is checked by a test. Ports (`ledger.port.ts`,
+`pool.port.ts`) stay with their domain; their adapters live in `stores/`.
+Data shapes live in `types/`; interfaces with methods are contracts and stay
+beside the domain that defines them.
+See [ADR 0021](backend/docs/adr/0021-repository-layout.md).
 
 ```bash
 docker build -f Dockerfile.api    -t cixtech-api .

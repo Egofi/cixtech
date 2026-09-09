@@ -1,16 +1,13 @@
-import {
-  type AddressBalance,
-  InsufficientPoolFundsError,
-  POOL_SCHEMA_SQL,
-  PoolGatherer,
-  PoolManager,
-  SqlPoolStore,
-} from "@/attribution";
-import type { SqlClient } from "@/ledger";
+import type { AddressBalance } from "@/attribution";
+import { PoolGatherer, PoolManager } from "@/attribution";
+import { InsufficientPoolFundsError } from "@/common";
+import { POOL_SCHEMA_SQL } from "@/schemas/sql";
+import { SqlPoolStore } from "@/stores";
+import type { SqlClient } from "@/types";
+
 import { freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
-// index → address, and each address's fake on-chain balance.
 const ADDR = (i: number) => `TPool${i}`;
 const BAL: Record<string, bigint> = { TPool0: 200_000n, TPool1: 300_000n, TPool2: 400_000n };
 const balances: AddressBalance = {
@@ -27,7 +24,7 @@ beforeEach(async () => {
   const sql = db.sql;
   let index = 0;
   const pool = new PoolManager(new SqlPoolStore(sql), () => ADDR(index++), { cooldownMs: 60_000 });
-  // Three funded pool addresses for the same (tenant, merchant, chain).
+
   await pool.assign("t1", "m1", "TRON", "inv-0", "xpub");
   await pool.assign("t1", "m1", "TRON", "inv-1", "xpub");
   await pool.assign("t1", "m1", "TRON", "inv-2", "xpub");
@@ -37,8 +34,7 @@ beforeEach(async () => {
 describe("PoolGatherer.gather — multi-address consolidation (ADR 0009 §6.3)", () => {
   it("uses a single leg when one address covers the amount", async () => {
     const legs = await gatherer.gather("t1", "m1", "TRON", "USDT", 350_000n);
-    // Each leg carries the strategy its address was minted under (ADR 0011) — the
-    // payout drains it with that mechanism, not the current toggle.
+
     expect(legs).toEqual([
       {
         address: "TPool2",

@@ -21,13 +21,6 @@ const NAV: NavItem[] = [
   { href: "/admin/errors/", label: "Errors", icon: "⚠" },
 ];
 
-/**
- * Loads the asset registry once for the whole console.
- *
- * Every money figure on every page needs decimals, and they come from the API
- * rather than a table in this codebase. Fetching it here means a page cannot
- * render a balance before the decimals that make it meaningful have arrived.
- */
 function Chrome({ signOut, children }: { signOut: () => void; children: ReactNode }) {
   const meta = useApi(
     () => admin.get<{ assets: AssetInfo[]; env: string | null }>("/admin/api/assets"),

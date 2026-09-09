@@ -1,11 +1,10 @@
-import {
-  POLICY_SCHEMA_SQL,
-  SqlKillSwitch,
-  SqlVelocityLimiter,
-} from "@/chains/payout/policy-store.js";
-import type { PayoutContext } from "@/chains/payout/policy.js";
-import { PolicyDeniedError, PolicyEngine } from "@/chains/payout/policy.js";
-import type { SqlClient } from "@/ledger";
+import { POLICY_SCHEMA_SQL } from "@/schemas/sql";
+import { SqlKillSwitch, SqlVelocityLimiter } from "@/stores";
+import type { PayoutContext, SqlClient } from "@/types";
+
+import { PolicyEngine } from "@/chains/payout/policy.js";
+import { PolicyDeniedError } from "@/common";
+
 import { type TestDatabase, freshDatabase } from "@test/support/index.js";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -43,7 +42,7 @@ describe("SqlKillSwitch (durable)", () => {
 
   it("a fresh instance on the same store sees the engaged state (survives restart)", async () => {
     await new SqlKillSwitch(sql).engage("halt");
-    // A brand-new instance (simulating another node / a restart) reads the same row.
+
     expect(await new SqlKillSwitch(sql).engaged(ctx())).toBe(true);
   });
 
@@ -68,13 +67,11 @@ describe("SqlVelocityLimiter (durable)", () => {
     const now = new Date("2026-01-01T00:00:00Z");
 
     await expect(limiter.admit(ctx(), now)).resolves.toBeUndefined();
-    await expect(limiter.admit(ctx(), now)).resolves.toBeUndefined(); // 200 ≤ 250
-    await expect(limiter.admit(ctx(), now)).rejects.toThrow(PolicyDeniedError); // → 300
+    await expect(limiter.admit(ctx(), now)).resolves.toBeUndefined();
+    await expect(limiter.admit(ctx(), now)).rejects.toThrow(PolicyDeniedError);
 
-    // Independent budget per merchant.
     await expect(limiter.admit(ctx({ merchant: "m2" }), now)).resolves.toBeUndefined();
 
-    // Past the window, earlier spend has aged out.
     const later = new Date(now.getTime() + 61 * 60_000);
     await expect(limiter.admit(ctx(), later)).resolves.toBeUndefined();
   });
@@ -82,7 +79,7 @@ describe("SqlVelocityLimiter (durable)", () => {
   it("state is shared across instances (survives restart)", async () => {
     const now = new Date("2026-02-01T00:00:00Z");
     await new SqlVelocityLimiter(sql, config).admit(ctx({ amountBaseUnits: 200_000_000n }), now);
-    // A new instance sees the prior spend and denies the one that would breach.
+
     await expect(
       new SqlVelocityLimiter(sql, config).admit(ctx({ amountBaseUnits: 100_000_000n }), now),
     ).rejects.toThrow(PolicyDeniedError);

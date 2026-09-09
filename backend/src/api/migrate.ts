@@ -1,20 +1,9 @@
+import { type Database, openDatabase, redactDatabaseUrl, resolveDatabaseUrls } from "@/postgres";
+import type { AppliedSchema, MigrateOptions } from "@/types";
 import { connectionStringFor, provisionAppRole } from "./app-role.js";
-import { type Database, openDatabase, redactDatabaseUrl, resolveDatabaseUrls } from "./db.js";
-import { checkRlsEffective, withTenant } from "./rls.js";
-import { type AppliedSchema, applySchemas } from "./sql.js";
 
-/**
- * Schema migration command (`pnpm db:migrate`).
- *
- * Applies every schema module to the configured database, records what was
- * applied, re-runs the §13 row-level-security boot guard, and — when the runtime
- * URL is a pooled endpoint distinct from the direct one — verifies the assumption
- * ADR 0013 left open: that transaction-scoped `set_config` (what `withTenant` uses
- * to bind tenant isolation) survives a PgBouncer transaction-mode pooler.
- *
- * DDL runs against the DIRECT endpoint. Neon fronts the pooled URL with PgBouncer
- * in transaction mode, where session state and prepared statements do not survive.
- */
+import { checkRlsEffective, withTenant } from "./rls.js";
+import { applySchemas } from "./sql.js";
 
 const ok = (s: string) => `  ✓ ${s}`;
 const bad = (s: string) => `  ✗ ${s}`;
@@ -25,11 +14,6 @@ const STATUS_NOTE: Record<AppliedSchema["status"], string> = {
   changed: "CHANGED since first applied",
 };
 
-/**
- * Prove tenant isolation actually filters rows on this database, rather than
- * merely being installed. Uses `pg_catalog` visibility of the GUC inside and
- * outside a transaction — the exact mechanism `withTenant` depends on.
- */
 async function verifyTransactionScopedGuc(db: Database): Promise<{ pass: boolean; note: string }> {
   const inside = await withTenant(db.sql, "cixtech-migrate-probe", (tx) =>
     tx.query<{ v: string | null }>("SELECT current_setting('cixtech.tenant', true) AS v"),
@@ -37,8 +21,7 @@ async function verifyTransactionScopedGuc(db: Database): Promise<{ pass: boolean
   if (inside.rows[0]?.v !== "cixtech-migrate-probe") {
     return { pass: false, note: "set_config did not bind inside the transaction" };
   }
-  // After the transaction commits the setting must be gone. If it leaked, a pooled
-  // connection could hand one tenant's GUC to the next request on that connection.
+
   const after = await db.sql.query<{ v: string | null }>(
     "SELECT current_setting('cixtech.tenant', true) AS v",
   );
@@ -47,15 +30,6 @@ async function verifyTransactionScopedGuc(db: Database): Promise<{ pass: boolean
     return { pass: false, note: `setting leaked past the transaction as "${leaked}"` };
   }
   return { pass: true, note: "transaction-scoped and does not leak across requests" };
-}
-
-export interface MigrateOptions {
-  /**
-   * Also provision the least-privileged application role (`--create-app-role`).
-   * Prints a connection string for it exactly once — it is not stored anywhere.
-   */
-  createAppRole?: boolean;
-  appRoleName?: string;
 }
 
 export async function migrate(
@@ -84,7 +58,6 @@ export async function migrate(
     );
   }
 
-  // DDL always goes to the direct endpoint.
   const direct = openDatabase(env, { direct: true, maxConnections: 2 });
   try {
     console.log("\nschema modules");
@@ -131,8 +104,6 @@ export async function migrate(
     await direct.close();
   }
 
-  // ADR 0013's open question: does transaction-local tenant binding survive the
-  // pooler? Only meaningful when the runtime URL differs from the direct one.
   console.log("\ntenant-isolation binding on the runtime connection");
   const runtime = openDatabase(env, { maxConnections: 2 });
   let bypassing: string | undefined;
@@ -147,8 +118,6 @@ export async function migrate(
       return 1;
     }
 
-    // Binding the GUC is necessary but not sufficient: the role must also be
-    // subject to the policies it binds for.
     const effective = await checkRlsEffective(runtime.sql);
     console.log(
       effective.bypasses
@@ -196,7 +165,6 @@ if (isEntry) {
   migrate(process.env, options)
     .then((code) => process.exit(code))
     .catch((err: unknown) => {
-      // Never let a driver error print the connection string (it carries the password).
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\nmigration failed: ${message}\n`);
       process.exit(1);

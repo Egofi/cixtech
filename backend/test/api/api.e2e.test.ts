@@ -1,4 +1,4 @@
-import type { ChainDeposit } from "@/chains";
+import type { ChainDeposit } from "@/types";
 import type { FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEST, auth, makeApi } from "./harness.js";
@@ -23,14 +23,13 @@ describe("tenant API", () => {
     const res = await ctx.app.inject({ method: "POST", url: "/v1/accounts", payload: {} });
     expect(res.statusCode).toBe(401);
     expect(res.json().error.code).toBe("UNAUTHORIZED");
-    expect(res.json().error.id).toMatch(/^[0-9a-f-]{36}$/); // every error carries an id (ADR 0012)
+    expect(res.json().error.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("runs the full flow: account → deposit address → deposit credited → balance → payout", async () => {
     const { app, engine, broadcaster, apiKey } = ctx;
     const accountId = await createAccount(app, apiKey);
 
-    // Assign a real derived deposit address.
     const addrRes = await app.inject({
       method: "POST",
       url: `/v1/accounts/${accountId}/deposit-addresses`,
@@ -41,7 +40,6 @@ describe("tenant API", () => {
     const address = addrRes.json().address as string;
     expect(address.startsWith("T")).toBe(true);
 
-    // A confirmed deposit lands at that address (detection path).
     const deposit: ChainDeposit = {
       chain: "TRON",
       txId: "seed-tx",
@@ -53,7 +51,6 @@ describe("tenant API", () => {
     };
     expect((await engine.ingestor.ingestConfirmed(deposit)).status).toBe("credited");
 
-    // Balance reflects the deposit minus the 0.5% fee.
     const balRes = await app.inject({
       method: "GET",
       url: `/v1/accounts/${accountId}/balance?asset=USDT`,
@@ -61,7 +58,6 @@ describe("tenant API", () => {
     });
     expect(balRes.json()).toEqual({ asset: "USDT", available: "9950000" });
 
-    // Request a payout — guarded, gathered, signed, settled.
     const payRes = await app.inject({
       method: "POST",
       url: `/v1/accounts/${accountId}/withdrawals`,
@@ -69,10 +65,9 @@ describe("tenant API", () => {
       payload: { chain: "TRON", asset: "USDT", amount: "1000000", destination: DEST },
     });
     expect(payRes.statusCode).toBe(200);
-    expect(payRes.json().from).toBe(address); // paid from the gathered pool address
+    expect(payRes.json().from).toBe(address);
     expect(broadcaster.sent).toHaveLength(1);
 
-    // Balance dropped by the payout.
     const balAfter = await app.inject({
       method: "GET",
       url: `/v1/accounts/${accountId}/balance?asset=USDT`,
@@ -149,8 +144,8 @@ describe("tenant API", () => {
       payload: body,
     });
 
-    expect(second.json()).toEqual(first.json()); // replayed
-    expect(broadcaster.sent).toHaveLength(1); // broadcast exactly once
+    expect(second.json()).toEqual(first.json());
+    expect(broadcaster.sent).toHaveLength(1);
   });
 
   it("releases the idempotency key after a failed request so a retry can proceed", async () => {
@@ -173,7 +168,7 @@ describe("tenant API", () => {
     });
 
     const headers = { ...auth(apiKey), "idempotency-key": "retry" };
-    // First attempt fails policy (non-allow-listed) → key released.
+
     const bad = await app.inject({
       method: "POST",
       url: `/v1/accounts/${accountId}/withdrawals`,
@@ -187,7 +182,6 @@ describe("tenant API", () => {
     });
     expect(bad.statusCode).toBe(403);
 
-    // Retry with the SAME key but a valid destination now succeeds (not a 409 replay).
     const ok = await app.inject({
       method: "POST",
       url: `/v1/accounts/${accountId}/withdrawals`,

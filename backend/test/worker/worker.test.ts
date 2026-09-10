@@ -1,0 +1,32 @@
+import { applySchemas } from "@/api/sql.js";
+import { SqlPoolGroupEnumerator } from "@/stores";
+
+import { freshDatabase } from "@test/support/index.js";
+import { describe, expect, it } from "vitest";
+
+describe("SqlPoolGroupEnumerator", () => {
+  it("returns pool groups with addresses that are not in AVAILABLE state", async () => {
+    const db = await freshDatabase();
+    const sql = db.sql;
+    await applySchemas(sql);
+
+    await sql.query(
+      `INSERT INTO pool_address (id, tenant, merchant, chain, derivation_index, address, state, gather_strategy)
+       VALUES
+         ('pa-1', 't-1', 'm-1', 'TRON', 0, 'TAddr1', 'RESERVED', 'EOA_FUND_TRANSFER'),
+         ('pa-2', 't-1', 'm-1', 'TRON', 1, 'TAddr2', 'IN_USE', 'EOA_FUND_TRANSFER'),
+         ('pa-3', 't-1', 'm-2', 'EVM', 0, '0xAddr3', 'AVAILABLE', 'EOA_FUND_TRANSFER')`,
+    );
+
+    const enumerator = new SqlPoolGroupEnumerator(sql);
+    const groups = await enumerator.poolGroups();
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.tenant).toBe("t-1");
+    expect(groups[0]?.merchant).toBe("m-1");
+    expect(groups[0]?.chain).toBe("TRON");
+    expect(groups[0]?.addresses).toContain("TAddr1");
+    expect(groups[0]?.addresses).toContain("TAddr2");
+    expect(groups[0]?.addresses).not.toContain("0xAddr3");
+  });
+});

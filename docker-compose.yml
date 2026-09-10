@@ -3,16 +3,13 @@ services:
     image: postgres:17-alpine
     container_name: cixtech-postgres
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-cixtech_owner}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cixtech_owner_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-cixtech}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    env_file: ./backend/.env
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cixtech_owner} -d ${POSTGRES_DB:-cixtech}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-cixtech_owner} -d $${POSTGRES_DB:-cixtech}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -21,8 +18,8 @@ services:
     image: redis:7-alpine
     container_name: cixtech-redis
     restart: unless-stopped
-    ports:
-      - "${REDIS_PORT:-6380}:6379"
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -33,45 +30,66 @@ services:
 
   api:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile.api
     container_name: cixtech-api
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "3000:3000"
+    env_file: ./backend/.env
     environment:
       NODE_ENV: production
-      PORT: ${PORT:-3000}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      CHAIN_ENV: ${CHAIN_ENV:-testnet}
-      # Built from the POSTGRES_* knobs above rather than ${DATABASE_URL:-…}: a
-      # repo-root .env written for `make dev` points at localhost, and compose
-      # would substitute that here — inside this container localhost is itself.
-      # On the compose network the host is always the `postgres` service.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:-cixtech_owner_secret}@postgres:5432/${POSTGRES_DB:-cixtech}
-      DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:-cixtech_owner_secret}@postgres:5432/${POSTGRES_DB:-cixtech}
-      # postgres:17-alpine serves no TLS. `sslmode` in the URL is deliberately
-      # ignored (see sslFor in @cixtech/postgres) — TLS has one source of truth,
-      # and opting out of it for a custody database has to be explicit.
-      CIXTECH_DB_SSL: ${CIXTECH_DB_SSL:-disable}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      CIXTECH_ENGINE_XPRV: ${CIXTECH_ENGINE_XPRV:-xprv9xwqBRQ6vATr5D93zLEaXHbyJXbQcn5mYy5BcBpqpcFWmZLTdqmzUTq4wnDcGYRKMFKVo4fqo6mbTP8MyyJzNUMi8LsvJRy4vARF9Z1KJNt}
-      CIXTECH_ADMIN_TOKEN: ${CIXTECH_ADMIN_TOKEN:-dev-admin-token-secret}
-      CIXTECH_MAX_PAYOUT: ${CIXTECH_MAX_PAYOUT:-1000000000}
-      CIXTECH_VELOCITY_WINDOW_MS: ${CIXTECH_VELOCITY_WINDOW_MS:-86400000}
-      CIXTECH_VELOCITY_MAX: ${CIXTECH_VELOCITY_MAX:-10000000000}
-      TRON_RPC_URL: ${TRON_RPC_URL:-https://nile.trongrid.io}
-      TRON_USDT_ADDRESS: ${TRON_USDT_ADDRESS:-TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf}
+      PORT: "3000"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:-cixtech_local_dev}@postgres:5432/${POSTGRES_DB:-cixtech}
+      DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:-cixtech_local_dev}@postgres:5432/${POSTGRES_DB:-cixtech}
+      REDIS_URL: redis://redis:6379
+      CIXTECH_DB_SSL: disable
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    container_name: cixtech-worker
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      NODE_ENV: production
+      WORKER_PORT: "3001"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:-cixtech_local_dev}@postgres:5432/${POSTGRES_DB:-cixtech}
+      REDIS_URL: redis://redis:6379
+      CIXTECH_DB_SSL: disable
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cixtech-web
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file: ./backend/.env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 volumes:
   postgres_data:

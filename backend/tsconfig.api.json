@@ -1,0 +1,13 @@
+{
+  // The HTTP adapter (src/api).
+  //
+  // Fastify's request/reply generics are not compatible with
+  // exactOptionalPropertyTypes, so it is disabled HERE ONLY — the same exemption
+  // apps/api/tsconfig.json carried before the merge. Every other module is still
+  // checked with it on by tsconfig.json; this is a scoped exception, not a
+  // repo-wide relaxation.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "exactOptionalPropertyTypes": false },
+  "include": ["src/api/**/*.ts", "src/schemas/http/**/*.ts", "types/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

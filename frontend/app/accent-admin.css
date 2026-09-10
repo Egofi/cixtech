@@ -1,0 +1,27 @@
+/* Admin identity: egofi's primary blue. Everything else is the shared kit above.
+   `--accent` is the button/ring background; `--accent-ink` is the same hue made
+   readable as TEXT, which is why the two diverge under dark. */
+:root {
+  --accent: #1d4ed8;
+  --accent-hi: #1e40af;
+  --accent-fg: #fff;
+  --accent-ink: #1d4ed8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: #2563eb;
+    --accent-hi: #3b82f6;
+    --accent-ink: #60a5fa;
+  }
+}
+:root[data-theme="dark"] {
+  --accent: #2563eb;
+  --accent-hi: #3b82f6;
+  --accent-ink: #60a5fa;
+}
+.keyrow.revoked td {
+  opacity: 0.5;
+}
+.keyrow.revoked td:last-child {
+  opacity: 1;
+}

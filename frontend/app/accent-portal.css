@@ -1,0 +1,24 @@
+/* Tenant identity: egofi's info sky, so the portal is distinguishable from the
+   admin console at a glance while staying inside one system. Everything else is
+   the shared kit above. */
+:root {
+  --accent: #0369a1;
+  --accent-hi: #075985;
+  --accent-fg: #fff;
+  --accent-ink: #0369a1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: #0284c7;
+    --accent-hi: #0ea5e9;
+    --accent-ink: #38bdf8;
+  }
+}
+:root[data-theme="dark"] {
+  --accent: #0284c7;
+  --accent-hi: #0ea5e9;
+  --accent-ink: #38bdf8;
+}
+.actions {
+  white-space: nowrap;
+}

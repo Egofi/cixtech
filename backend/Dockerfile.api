@@ -1,0 +1,38 @@
+FROM node:20-alpine AS base
+WORKDIR /app
+RUN apk add --no-cache curl && \
+    corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+FROM base AS deps
+COPY package.json pnpm-lock.yaml .npmrc ./
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+
+FROM deps AS build
+COPY tsconfig.base.json tsconfig.json tsconfig.api.json build.mjs bundle.mjs ./
+COPY types ./types
+COPY src ./src
+RUN pnpm typecheck
+RUN pnpm build
+
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prod --ignore-scripts
+
+FROM base AS runtime
+ENV NODE_ENV=production
+RUN chown node:node /app
+WORKDIR /app
+
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --chown=node:node docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
+
+USER node
+EXPOSE 3000
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:3000/health || exit 1
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["node", "dist/api.mjs"]

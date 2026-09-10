@@ -78,6 +78,23 @@ pnpm dev                      # API      :3000
 pnpm dev:worker               # worker   :3001   (needs REDIS_URL)
 ```
 
+Running `pnpm dev` on the host needs the datastores reachable from the host, and
+the base compose file deliberately does not publish them (see CX-18). Bring them
+up with the dev overlay, which binds to loopback only and is never loaded unless
+you pass `-f`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis
+pnpm db:migrate
+pnpm dev
+```
+
+Redis is published on **6380**, not 6379, because 6379 is often already taken by
+another project — and pointing cixtech's queues at someone else's Redis fails
+silently rather than loudly. `backend/.env` must match:
+`REDIS_URL=redis://127.0.0.1:6380`. Containers are unaffected; compose sets their
+`DATABASE_URL` and `REDIS_URL` to the service names.
+
 | Command | |
 | --- | --- |
 | `pnpm check` | typecheck + lint + constants guard + tests |

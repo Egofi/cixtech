@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AppliedSchema, SchemaModule, SqlClient } from "@/types";
+import type { AppliedSchema, SchemaModule, SqlClient, SqlResult } from "@/types";
 
 import type { MigratableSqlClient } from "@/postgres";
 import {
@@ -81,12 +81,27 @@ export async function applySchemas(sql: MigratableSqlClient): Promise<AppliedSch
 }
 
 export async function assertSchemaReady(sql: SqlClient): Promise<void> {
-  const present = await sql
-    .query<{ name: string; checksum: string }>("SELECT name, checksum FROM schema_migration")
-    .catch(() => null);
-  if (!present) {
+  let present: SqlResult<{ name: string; checksum: string }>;
+  try {
+    present = await sql.query<{ name: string; checksum: string }>(
+      "SELECT name, checksum FROM schema_migration",
+    );
+  } catch (err) {
+    // Only an existing, reachable database can be missing a table. Anything else
+    // — refused connection, bad credentials, wrong host — is a different problem,
+    // and reporting it as "run db:migrate" sends the reader somewhere that will
+    // fail in exactly the same way.
+    const code = (err as { code?: string }).code;
+    if (code === "42P01") {
+      throw new Error(
+        "Database has no schema_migration table — run `pnpm db:migrate` before starting the engine.",
+      );
+    }
     throw new Error(
-      "Database has no schema_migration table — run `pnpm db:migrate` before starting the engine.",
+      `Cannot reach the database to check its schema (${code ?? "unknown error"}): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      { cause: err },
     );
   }
   const recorded = new Map(present.rows.map((r) => [r.name, r.checksum]));

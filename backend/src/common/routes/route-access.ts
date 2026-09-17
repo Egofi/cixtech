@@ -32,6 +32,10 @@ export const ROUTE_KEYS = [
   "POST /admin/api/tenants/:id/keys",
   "GET /admin/api/tenants/:id/users",
   "POST /admin/api/tenants/:id/users",
+  "POST /admin/api/tenants/:id/users/:userId/disable",
+  "POST /admin/api/tenants/:id/users/:userId/enable",
+  "POST /admin/api/tenants/:id/users/:userId/reset-password",
+  "POST /admin/api/tenants/:id/users/:userId/revoke-sessions",
   "GET /admin/api/tenants/:id",
   "GET /admin/api/tenants",
   "POST /admin/api/tenants",
@@ -120,6 +124,22 @@ export const ROUTE_ACCESS: Record<RouteKey, RouteAccess<Permission>> = {
   "POST /admin/api/tenants/:id/keys": { kind: "operator", permission: "admin.tenants.manage" },
   "GET /admin/api/tenants/:id/users": { kind: "operator", permission: "admin.tenants.manage" },
   "POST /admin/api/tenants/:id/users": { kind: "operator", permission: "admin.tenants.manage" },
+  "POST /admin/api/tenants/:id/users/:userId/disable": {
+    kind: "operator",
+    permission: "admin.tenants.manage",
+  },
+  "POST /admin/api/tenants/:id/users/:userId/enable": {
+    kind: "operator",
+    permission: "admin.tenants.manage",
+  },
+  "POST /admin/api/tenants/:id/users/:userId/reset-password": {
+    kind: "operator",
+    permission: "admin.tenants.manage",
+  },
+  "POST /admin/api/tenants/:id/users/:userId/revoke-sessions": {
+    kind: "operator",
+    permission: "admin.tenants.manage",
+  },
   "GET /admin/api/tenants/:id": { kind: "operator", permission: "admin.read" },
   "GET /admin/api/tenants": { kind: "operator", permission: "admin.read" },
   "POST /admin/api/tenants": { kind: "operator", permission: "admin.tenants.manage" },

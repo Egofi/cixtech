@@ -67,6 +67,15 @@ export interface Engine {
 
   feeSweepPlanner: FeeSweepPlanner;
 
+  /**
+   * Exposed because every value-moving path needs it, not just payouts: an
+   * address can only be drained by the strategy it was minted under (ADR 0011),
+   * and `prepare` is where that strategy provisions gas. The admin fee sweep
+   * reaches it through here; without it, that sweep builds an ERC-20 transfer
+   * from an address with no gas behind it.
+   */
+  gatherStrategies: GatherStrategyRegistry | undefined;
+
   gatherLease: GatherLease;
   gatherConfig: GatherConfigStore;
   chains: ChainRouter;
@@ -142,6 +151,7 @@ export function buildEngine(cfg: EngineConfig): Engine {
     broadcaster,
     authorizer,
     feeSweepPlanner,
+    gatherStrategies: cfg.gatherStrategies,
     gatherLease,
     gatherConfig,
     chains: cfg.chains,

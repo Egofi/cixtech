@@ -9,6 +9,7 @@ const ENTRIES = {
   api: "src/api/server.ts",
   worker: "src/worker/main.ts",
   migrate: "src/api/migrate.ts",
+  "derive-address": "src/api/derive-address.ts",
 };
 
 function stripInlineComment(raw) {
@@ -61,4 +62,18 @@ if (!entry) {
 
 loadEnv();
 const out = await bundleFile(resolve(here, entry), resolve(here, `.dev-${which}.mjs`));
+
+// Point argv[1] at the bundle we are about to run, not at this launcher.
+//
+// `src/api/migrate.ts` decides whether it is the entry point with
+// `process.argv[1]?.includes("migrate")`. Launched as `node dev-run.mjs migrate`
+// that test saw "dev-run.mjs", so the module was imported, defined `migrate()`,
+// and returned without ever calling it -- `pnpm db:migrate` exited 0 having
+// applied nothing. It worked in Docker only because the entrypoint runs
+// `node dist/migrate.mjs` directly.
+//
+// Flags are unaffected: migrate reads `process.argv.slice(2)`, which still holds
+// `["migrate", "--create-app-role", ...]`, and it matches on the flag name.
+process.argv[1] = out;
+
 await import(pathToFileURL(out).href);

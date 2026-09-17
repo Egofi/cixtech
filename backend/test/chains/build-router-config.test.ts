@@ -101,3 +101,31 @@ describe("the newly added EVM chains", () => {
     });
   }
 });
+
+describe("the engine key is rejected by name, not by base58", () => {
+  // REPLACE_ME reached HDKey's base58 decoder and surfaced as
+  // `Unknown letter "_"` from four frames down, naming no variable -- two and a
+  // half minutes into a `make up` image build. It is the most likely value to
+  // still be in a fresh .env, so it gets its own message.
+  const sql = { query: async () => ({ rows: [] }), transaction: async () => undefined } as never;
+
+  it("names the variable when it is unset", () => {
+    expect(() => buildRouter({}, sql)).toThrow(/CIXTECH_ENGINE_XPRV is required/);
+  });
+
+  it("says so when it is still the placeholder", () => {
+    expect(() => buildRouter({ CIXTECH_ENGINE_XPRV: "REPLACE_ME" }, sql)).toThrow(
+      /still the placeholder/,
+    );
+  });
+
+  it("says so when it is not a valid extended key", () => {
+    expect(() => buildRouter({ CIXTECH_ENGINE_XPRV: "xprvNotRealAtAll" }, sql)).toThrow(
+      /not a valid extended private key/,
+    );
+  });
+
+  it("points at the command that generates one", () => {
+    expect(() => buildRouter({ CIXTECH_ENGINE_XPRV: "REPLACE_ME" }, sql)).toThrow(/make key/);
+  });
+});

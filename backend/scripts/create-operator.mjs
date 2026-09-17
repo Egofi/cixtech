@@ -51,7 +51,7 @@ if (!email) {
 
 const { bundleFile } = await import(pathToFileURL(resolve(root, "bundle.mjs")).href);
 const entry = resolve(root, ".create-operator.mjs");
-await bundleFile(resolve(root, "scripts/create-operator-entry.ts"), entry);
+await bundleFile(resolve(root, "src/api/create-operator.ts"), entry);
 const mod = await import(pathToFileURL(entry).href);
 
 const result = await mod.createOperator({ kind, email, role, tenantId, password });

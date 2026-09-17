@@ -11,6 +11,8 @@ export const CHAIN_ERROR_CODES = [
   "WITHDRAWAL_NOT_FOUND",
   "FEE_TREASURY_NOT_CONFIGURED",
   "SWEEP_HALTED",
+  "GAS_FLOAT_DEPLETED",
+  "GAS_TREASURY_NOT_CONFIGURED",
 ] as const;
 
 export type ChainErrorCode = (typeof CHAIN_ERROR_CODES)[number];

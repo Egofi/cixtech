@@ -698,6 +698,148 @@ checked one admin route, which is why this survived.
 
 ---
 
+## Second pass — the money path end to end
+
+The coverage note below asked for a focused second pass over the chain adapters,
+the ledger invariants and the reconciliation paths, which had a lighter read than
+the HTTP surface. That pass found four defects. None is an attacker-facing
+vulnerability; three are availability failures on the money path, and all four
+share a shape worth naming: **a control that reads its input from a source that
+cannot answer.** Each was invisible to the suite because every test substituted a
+source that could.
+
+### CX-26 — The worker's default configuration freezes every payout
+
+**Severity:** High · **Status:** proven by inspection, fixed
+**Location:** `src/worker/main.ts` (reconciler wiring), `src/chains/reconcile/external-reconciler.ts`
+
+`ExternalReconciler` compares each ledger ASSET account against an on-chain
+balance and trips the kill switch on any difference. That is ADR 0010 working as
+designed — withdrawals freeze, a human is paged — and it is the correct response
+to real drift.
+
+The worker only had a real chain balance source when
+`CIXTECH_RECONCILE_CHAIN_BALANCES=true`. Unset — the default — it substituted a
+stub returning `0n` for every address, **while still passing the global
+`SqlKillSwitch` as the breaker.** So on any default deployment, the first credited
+deposit made `pool_addr:{chain}:{merchant}` non-zero against a reported `0n`,
+which read as drift, which engaged the global kill switch. Every payout on every
+chain then answered `Payouts are halted (kill-switch engaged)`, and it re-tripped
+within one reconcile interval of each manual reset.
+
+The start-up log called this "ledger-only mode". It was not a mode; it was the
+reconciler comparing the ledger against a constant.
+
+**Fix.** `planExternalReconciliation` (`src/worker/reconcile-wiring.ts`) decides
+this in one place: external reconciliation runs **only** with a real chain source.
+Otherwise it is off — the repeatable schedule is removed rather than left
+enqueuing work no worker consumes, and start-up logs at ERROR that the ledger is
+not being checked. A reconciler with nothing to reconcile against is off; it never
+answers from a placeholder.
+
+### CX-27 — Token payouts could not be broadcast in the shipped wiring
+
+**Severity:** High · **Status:** proven by inspection, fixed
+**Location:** `src/chains/treasury/gas-station.ts`, `src/api/server.ts`
+
+ADR 0011 closed the gap where EVM ERC-20 payouts had no native gas behind them:
+`GatherStrategy.prepare` provisions gas before the transfer is signed. The seam
+was built and wired correctly. The guard in front of it was not.
+
+`GasStation.provision` refuses when the float is below its floor — and read that
+float from the **ledger** account `gas_float:{chain}`. Nothing in the engine ever
+credits that account: `payoutSettled` and `feeSwept` accept an optional
+`networkFee` leg and no caller supplies one. So the balance was always `0`, the
+floor (`perTransferBaseUnits * 10`) was always greater, and every non-native
+payout threw `gas_float:X below floor — payouts frozen` before reaching a
+broadcaster. Tron USDT included — the launch asset.
+
+The suite could not see it. `test/chains/gather-dispatch.e2e.test.ts` injects a
+fake provisioner that always succeeds; `payout-wired.e2e.test.ts` constructs
+`PayoutService` with no options, so `prepare()` is skipped entirely; and the live
+Nile tests call `broadcaster.send` directly. No test ran `GasStation.provision`.
+
+**Fix.** The float is now a port, `GasFloatSource`, and production wires
+`TreasuryGasFloat` — the **on-chain native balance of the gas treasury address**,
+which is the same balance `BroadcasterGasFunder` spends from, so the health check
+and the payment can no longer disagree. `LedgerGasFloat` remains for a deployment
+that posts gas movements to the ledger, documented as unsuitable until those
+postings exist. `provision` also reports a missing treasury as the configuration
+fault it is, rather than as a depleted float.
+
+`test/chains/gas-float-source.test.ts` pins both halves: a zero-reading source
+refuses the payout, and the shipped source funds it.
+
+### CX-28 — The admin fee sweep skipped gas provisioning
+
+**Severity:** Medium · **Status:** confirmed, fixed
+**Location:** `src/api/engine.ts`, `src/services/admin.service.ts`
+
+`Engine` never exposed `gatherStrategies`, so `AdminService.sweepFees` built its
+`FeeSweepService` without one and the per-leg `GatherStrategy.prepare` call was
+skipped. An ERC-20 sweep leg was therefore broadcast from a pool address holding
+no native gas. `PayoutService`'s own opportunistic sweep did prepare, so one of
+the two value-moving paths had the guard and the other did not.
+
+It failed safe — each leg's error is caught and reported in `skipped[]`, so no
+funds are lost — but the console sweep could never succeed on an EVM chain.
+
+**Fix.** `Engine.gatherStrategies` is part of the interface, and the admin sweep
+passes it through. Both value-moving paths now resolve the strategy each address
+was minted under, which is what ADR 0011 requires of every gather.
+
+### CX-29 — The AI query engine did float arithmetic on balances
+
+**Severity:** Medium · **Status:** confirmed, fixed
+**Location:** `src/ai/financial-ai-engine.ts`, `src/ai/agentic-rules-engine.ts`
+
+Three problems in one expression, `Number(totalBalance) / 1e6`:
+
+- **`Number` on a base-unit balance.** Past 2^53 — about 9 USDT, or 0.01 ETH —
+  a float silently rounds. Principle 8 keeps floats out of the money path, and
+  ADR 0022 rejected Prisma partly to keep `Decimal` away from the ledger.
+- **A hardcoded scale.** Every asset was divided by `1e6`. An 18-decimal balance
+  (ETH, POL, BNB, AVAX) was reported a trillion times too large.
+- **A cross-asset sum.** `forTenantMerchants` returns every asset, and the engine
+  added USDT base units to ETH base units before dividing. The result was not a
+  balance in any asset.
+
+A fourth, underneath all of them: `balance.amount` is a signed net with **DEBIT
+positive**, so a liability such as `merchant_available` is stored *negative* when
+it holds value. `PortalService.balances` converts with `normalBalance` before
+showing anyone a figure; neither AI engine did. The reported float was therefore
+negative as well as mis-scaled.
+
+`AgenticRulesEngine` compared that same cross-asset, wrong-signed total against a
+rule threshold, and selected rows with an unanchored `LIKE '%' || tenantId || '%'`
+rather than the tenant's own accounts. Because a funded merchant's total came out
+negative and thresholds are positive, **every `BALANCE_BELOW` rule triggered on
+every evaluation** — the rule engine reported a permanent alert for any tenant
+holding money.
+
+The answer strings compounded it — a divided figure was labelled "base units" —
+and each branch carried an invented `confidenceScore` (`0.96`, `0.98`, `0.85`,
+`0.99`) over what are deterministic parameterised reads.
+
+**Fix.** `formatBaseUnits` / `describeAmount` / `totalsByAsset`
+(`src/chain-config/amount.ts`) do exact bigint-and-string arithmetic against the
+registry's own decimals, return `null` for an unknown asset rather than assuming
+a scale, and never add one asset to another. `normalTotalsByAsset`
+(`src/ai/balances.ts`) applies `normalBalance` first, so each account is counted
+in the direction it is normally carried in — the same conversion the portal
+already used. Both engines report per asset; the rules engine evaluates each asset
+against the threshold and names the ones that breached it.
+`confidenceScore` now reports whether the keyword matcher recognised the question
+at all, which is the only thing about these answers that is uncertain.
+
+**Not fixed, and still true:** a rule's `PAUSE_WITHDRAWALS` and `REQUIRE_APPROVAL`
+actions are still only *reported* by `evaluateRules`. Nothing in `PolicyEngine`
+consumes them. This is now stated on the route itself rather than implied away —
+enforcement is a feature, and it belongs behind the scope decision ADR 0017 left
+open for `@cixtech/ai`.
+
+---
+
 ## Remediation status
 
 All twenty-four findings have been addressed in code. `pnpm test` (118 API + 135
@@ -731,7 +873,7 @@ down.
 | CX-16 | `assertCustodyModelAcknowledged` refuses to start mainnet custody unless `CIXTECH_ACKNOWLEDGE_HOT_KEY=true` records that a hot in-process key is the intended posture. Boot logs the model explicitly, and the build spec's "threshold MPC" promise is corrected. **Moving the key into a KMS/HSM is still outstanding — see below.** |
 | CX-17 | `DELETE /v1/accounts/:id/allowlist`, effective immediately. `add` also returns the *stored* `usable_at` via `RETURNING`, so a re-add no longer reports a cool-down that is not in force. |
 | CX-18 | Three-stage `Dockerfile`: production dependencies only, pre-bundled entry points, and a non-root `USER node`. Postgres and Redis are no longer published to the host. |
-| CX-19 | `transferCommitment` uses a length-prefixed encoding, so a caller-controlled idempotency key containing spaces can no longer produce a colliding commitment. |
+| CX-19 | `transferCommitment` joins its fields on a NUL byte (`\0`) instead of a space. NUL cannot appear in any field it hashes — `intentId` carries the idempotency key, which arrives as an HTTP header, and Node's HTTP parser rejects a header containing NUL — so no caller-controlled value can span the separator and produce a colliding commitment. |
 | CX-20 | `randomUUID()` for rule and anomaly ids. |
 | CX-21 | `conditionThreshold` carries `pattern: "^[0-9]+$"`, matching the withdrawal schema. |
 | CX-22 | The zero-day-drain detector filters on `added_at`, not `usable_at`. |
@@ -760,3 +902,9 @@ Eleven findings are marked **proven** because a test was run and its output is q
 remainder are confirmed by reading the wiring. Chain-adapter parsing, the ledger's double-entry
 invariants, and the reconciliation paths had a lighter read than the HTTP and money-out surfaces and
 would repay a focused second pass.
+
+**That pass has since been done** — see *Second pass — the money path end to end* above, which
+records CX-26 through CX-29. It found no new attacker-facing vulnerability; the double-entry
+invariants and the chain-adapter parsing held. What it found were three availability failures on the
+money path and one money-arithmetic defect, all sharing one shape: a control reading its input from
+a source that could not answer, and a test suite that had substituted a source that could.

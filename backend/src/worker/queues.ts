@@ -39,16 +39,28 @@ export function createQueues(redis: IORedis) {
   };
 }
 
+/**
+ * Drop a repeatable schedule. Needed when a job is switched off between
+ * deployments: the schedule lives in Redis, not in this process, so leaving it
+ * behind would keep enqueuing work that no worker consumes.
+ */
+export async function removeRepeatable(queue: Queue, name: string): Promise<number> {
+  const existing = await queue.getRepeatableJobs();
+  let removed = 0;
+  for (const job of existing) {
+    if (job.name === name) {
+      await queue.removeRepeatableByKey(job.key);
+      removed++;
+    }
+  }
+  return removed;
+}
+
 export async function upsertRepeatable(
   queue: Queue,
   name: string,
   intervalMs: number,
 ): Promise<void> {
-  const existing = await queue.getRepeatableJobs();
-  for (const job of existing) {
-    if (job.name === name) {
-      await queue.removeRepeatableByKey(job.key);
-    }
-  }
+  await removeRepeatable(queue, name);
   await queue.add(name, {}, { repeat: { every: intervalMs }, jobId: name });
 }

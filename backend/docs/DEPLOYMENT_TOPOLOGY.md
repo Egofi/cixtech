@@ -74,7 +74,7 @@ Everything that runs on a schedule rather than in response to a request:
 | --- | --- | --- |
 | `deposit-detect` | Polls each chain, credits deposits past finality | 15s |
 | `webhook-dispatch` | Drains the outbox, retries, dead-letters | 5s |
-| `external-reconcile` | Ledger vs. chain reconciliation | 5m |
+| `external-reconcile` | Ledger vs. chain reconciliation — **off unless `CIXTECH_RECONCILE_CHAIN_BALANCES=true`** | 5m |
 | `pool-release` | Returns cooled addresses to AVAILABLE | 60s |
 | `pool-balance` | Refreshes the console's balance cache | 2m |
 
@@ -98,6 +98,21 @@ absent, and falls back to in-process loops for single-process development only.
 **Run one replica.** BullMQ gives one runner per repeatable job, but two worker
 processes still both attempt to register the schedules.
 
+### External reconciliation is opt-in, and off means off
+
+`external-reconcile` compares every ledger ASSET account against an on-chain
+balance and **trips the global kill switch on any difference** (ADR 0010), which
+halts every payout until an operator resets it. That is the right answer to real
+drift and a catastrophic one to imaginary drift, so it runs only when a real chain
+balance source exists — `CIXTECH_RECONCILE_CHAIN_BALANCES=true` plus a chain
+router. Otherwise the worker removes the schedule and logs at ERROR that the
+ledger is not being checked. It never substitutes a placeholder balance source;
+see `docs/SECURITY_AUDIT.md` (CX-26) for what happened when it did.
+
+Note that this reads balances through the same provider the detector uses, which
+does not yet satisfy the build spec's §2 independent-source rule — a single wrong
+provider would agree with itself. A second provider is outstanding.
+
 **Requires:** the same key material and chain configuration as the API — it
 derives the pool addresses it watches. This image is exactly as security-sensitive
 as the API image.
@@ -117,20 +132,21 @@ meant the frontend could never ship without redeploying the custody engine.
 
 ### Why a static export rather than a Next server
 
-`output: "export"` in `next.config.mjs`. Every page is behind a credential the
-browser holds (an admin bearer token or a tenant API key, in `localStorage`) and
-every byte of data comes from a separate cross-origin API. There is nothing to
-render on a server: no SEO surface, no session cookie to read, and no way to fetch
-a tenant's data server-side without forwarding their credential to a second
-machine.
+`output: "export"` in `next.config.mjs`. Every page is behind a human session
+(ADR 0018): an httpOnly `cx_session` cookie the page cannot read, plus a CSRF
+token held in memory and echoed on every mutation. Every byte of data comes from
+a separate cross-origin API, so there is nothing to render on a server — no SEO
+surface, and no way to fetch a tenant's data server-side without forwarding their
+session to a second machine.
 
 So the output is plain files behind nginx. That keeps the image small, and — more
-to the point — keeps a server process that handles admin tokens out of the
-deployment entirely.
+to the point — keeps a server process that handles credentials out of the
+deployment entirely. Nothing in the consoles stores a credential in
+`localStorage`; the only thing kept there is the light/dark theme preference.
 
 ### Routing
 
-Each of the 17 views is a route now, not a `views[name]()` dispatch. That is not
+Each of the 18 views is a route now, not a `views[name]()` dispatch. That is not
 cosmetic: an operator can link a colleague straight to the audit trail during an
 incident, and the back button works.
 
@@ -147,9 +163,12 @@ frontend/
   components/
     primitives.tsx      Table, Panel, Badge, Money, StatGrid, …
     shell.tsx           sidebar, navigation, sign-out
-    auth-gate.tsx       the credential wall
+    session-gate.tsx    the sign-in wall + forced password change
+    sign-in.tsx         password, then TOTP or a recovery code
+    theme-toggle.tsx    light/dark, the one thing kept in localStorage
   lib/
-    api.ts              typed client, credential storage, 401 handling
+    session.ts          cookie session, CSRF header, login/MFA/logout
+    api.ts              thin typed wrappers over session.apiFetch
     money.ts            base-unit arithmetic — never touches `number`
     labels.ts           plain language for ledger keys and entry kinds
     use-api.ts          fetch / loading / error, with stale-response guarding
@@ -167,21 +186,15 @@ and the API returns them as strings, so nothing there converts an amount to
 amount with more decimal places than the asset has rather than silently
 truncating someone's payout.
 
-`types/api.d.ts` is not compiled into the bundle — the consoles are plain browser
-JavaScript. It exists so the API contract is written down on the frontend side of
-the boundary. That boundary is real now: a running console may be older or newer
-than the API it is talking to, so a field has to be added before it is read, and
-read before it is removed.
+`types/api.d.ts` writes the API contract down on the frontend side of the
+boundary. That boundary is real: a running console may be older or newer than the
+API it is talking to, so a field has to be added before it is read, and read
+before it is removed.
 
-`build.mjs` resolves `/* @inject shared/ui-kit.js */` directives and copies to
-`dist/`. It is dependency-free — the consoles are plain ES5-compatible JS and
-hand-written CSS, so there is no framework to compile and no reason to make a
-static bundle depend on a toolchain that can break it.
-
-`verify.mjs` runs as the package's test and catches what a missing type system
-would not: unresolved inject directives, a kit injected twice, a syntax error, a
-bare `fetch()` that would hit the static host instead of the API, and a
-`config.js` that loads after `app.js`.
+`verify.mjs` runs after `next build` as the package's test, against the exported
+`out/`. It checks what a type system cannot: that every one of the 18 routes
+actually emitted an HTML document, and that each one loads `/config.js` — without
+which the console has no API base and every call goes to the static host.
 
 ```bash
 cd frontend && docker build -t cixtech-web .
@@ -189,31 +202,57 @@ cd frontend && docker build -t cixtech-web .
 
 ---
 
-## The two settings that must agree
+## The console proxies the API, so there is one origin
 
-Going cross-origin introduced exactly one coupling, and it is a common source of
-"the console loads but every call fails":
+The consoles and the API share an origin: the web container serves the static
+pages **and** forwards `/v1`, `/auth`, `/admin/api` and `/docs` to the API.
+
+```
+browser  ->  web:8080  ->  api:3000
+             (nginx)
+```
+
+The base compose file does not publish port 3000, so the API has no address the
+browser could reach even if the console tried. `docker-compose.dev.yml`
+republishes it on `127.0.0.1` for `curl`, `make smoke` and the API reference.
 
 | Setting | Service | Meaning |
 | --- | --- | --- |
-| `CIXTECH_API_BASE` | web | Where the **browser** reaches the API |
-| `CIXTECH_CORS_ORIGINS` | api | Comma-separated origins allowed to call the API |
+| `CIXTECH_API_BASE` | web | **Empty** to proxy (default). Set it to go cross-origin. |
+| `CIXTECH_API_UPSTREAM` | web | Where nginx forwards; `http://api:3000` by default |
+| `CIXTECH_TRUST_PROXY` | api | Whether `X-Forwarded-For` is believed |
+| `CIXTECH_CORS_ORIGINS` | api | Only needed cross-origin |
 
-`CIXTECH_API_BASE` must be reachable **from the browser**, not from inside the
-container network. `http://api:3000` works between containers and fails in a
-browser; that is why compose sets `http://localhost:3000`.
+Four properties worth knowing:
 
-Three properties worth knowing:
+* **`CIXTECH_TRUST_PROXY` is the load-bearing one.** Behind the proxy every
+  request arrives from nginx, so without it `req.ip` is the proxy for every
+  caller — which silently collapses the per-IP limit on failed credentials
+  (CX-08) into one bucket and writes nginx into the sign-in log and the admin
+  audit trail. It is set to `true` in the base file and `false` in the dev
+  overlay, because the overlay republishes port 3000 and anything able to reach
+  the API directly could otherwise forge the header.
+* **nginx replaces `X-Forwarded-For` rather than appending to it**, so a
+  client-supplied value cannot be prepended to the chain and read as the origin.
+* **The upstream is resolved per request**, via Docker's embedded DNS rather than
+  a literal hostname in `proxy_pass`. With a literal, nginx refuses to start at
+  all when the API is not up yet, turning a slow dependency into a crash loop.
+* **Cookies are `SameSite=Lax`.** One origin means the cross-site cookie ADR 0018
+  settled for is no longer needed, and Lax is strictly stronger. The CSRF
+  double-submit token stays regardless.
 
-* **There is no wildcard.** `*` on an API that accepts a bearer credential in a
-  header would let any page on the internet make authenticated calls with a stolen
-  key from the victim's own browser. The allowlist is explicit.
-* **`credentials` is off.** Both consoles authenticate with a header
-  (`x-api-key`, `authorization`), never a cookie, so there is no ambient session
-  for a hostile page to ride.
-* **Empty means no cross-origin browser access at all** — the correct setting for
-  a deployment that fronts the API and the consoles under one hostname via a
-  reverse proxy, where `CIXTECH_API_BASE` is also empty.
+`pnpm dev` mirrors this: `next.config.mjs` rewrites the same four prefixes in
+development, using `beforeFiles` so they win over the App Router, with
+`skipTrailingSlashRedirect` so `trailingSlash: true` cannot 308 an API call into
+a 404. The console's own code is identical in both modes — always relative URLs.
+
+### Going back to cross-origin
+
+Set `CIXTECH_API_BASE` on the web service to an origin the browser can reach.
+nginx then serves 404s on those prefixes instead of proxying, and
+`CIXTECH_CORS_ORIGINS` plus `CIXTECH_COOKIE_CROSS_SITE=true` on the api service
+have to come back with it. There is no wildcard: `*` is forbidden alongside
+credentials and the browser enforces it too.
 
 ### Security headers moved with the frontend
 

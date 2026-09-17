@@ -1,6 +1,7 @@
 import { kyselyFor } from "@/postgres";
 import { agentRule, aiBalances } from "@/queries";
 import type { AgentRuleAction, AgentRuleCondition, RuleEvaluationResult, SqlClient } from "@/types";
+import { normalTotalsByAsset } from "./balances.js";
 
 export class AgenticRulesEngine {
   constructor(private readonly sql: SqlClient) {}
@@ -16,13 +17,26 @@ export class AgenticRulesEngine {
       let reason = `Condition ${r.condition_type} evaluated cleanly`;
 
       if (r.condition_type === "BALANCE_BELOW") {
-        const balRows = await aiBalances.matchingAccount(kyselyFor(this.sql), tenantId).execute();
-        const currentBal = balRows.reduce((acc, b) => acc + BigInt(b.amount), 0n);
+        // Evaluated per asset. The previous version summed every asset's base
+        // units into one figure and compared that to the threshold, which is
+        // not a balance in any asset — and it matched accounts by an unanchored
+        // LIKE on the tenant id rather than the tenant's own accounts.
+        const balRows = await aiBalances
+          .forTenantMerchants(kyselyFor(this.sql), tenantId)
+          .execute();
         const threshold = BigInt(r.condition_threshold);
+        const totals = normalTotalsByAsset(balRows);
 
-        if (currentBal < threshold) {
+        const breached = [...totals.entries()]
+          .filter(([, amount]) => amount < threshold)
+          .sort(([a], [b]) => a.localeCompare(b));
+
+        if (breached.length > 0) {
           triggered = true;
-          reason = `Current balance (${currentBal}) is below configured threshold (${threshold})`;
+          const which = breached.map(([asset, amount]) => `${asset} ${amount}`).join(", ");
+          reason = `Below the configured threshold (${threshold}) for: ${which}`;
+        } else if (totals.size === 0) {
+          reason = "No balances recorded for this tenant, so BALANCE_BELOW did not evaluate";
         }
       }
 

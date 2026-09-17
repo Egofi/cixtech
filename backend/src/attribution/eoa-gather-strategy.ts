@@ -1,3 +1,4 @@
+import { GasTreasuryNotConfiguredError } from "@/common";
 import type { GatherPreparation, GatherStrategyKind, PrepareGatherInput } from "@/types";
 import type { GatherStrategy } from "./gather-strategy.js";
 import type { AddressDeriver } from "./pool-manager.js";
@@ -40,8 +41,9 @@ export class EoaFundTransferStrategy implements GatherStrategy {
     }
 
     if (!this.gas) {
-      throw new Error(
+      throw new GasTreasuryNotConfiguredError(
         `${input.chain} token payouts need native gas in the pool address, but no gas provisioner is configured`,
+        { context: { chain: input.chain, asset: input.asset } },
       );
     }
 

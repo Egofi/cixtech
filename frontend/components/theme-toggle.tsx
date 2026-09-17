@@ -34,9 +34,12 @@ export function ThemeToggle() {
   }
 
   const icon = theme === "light" ? "☀" : theme === "dark" ? "☾" : "◐";
+  // Glyph only: the label does not fit beside Sign out in the sidebar footer, and
+  // `title`/`aria-label` carry the current theme for anyone who needs it named.
+  const label = `Theme: ${theme}. Click to change.`;
   return (
-    <button type="button" onClick={cycle} title={`Theme: ${theme}`}>
-      {icon} {theme}
+    <button type="button" className="icon-button" onClick={cycle} title={label} aria-label={label}>
+      <span aria-hidden="true">{icon}</span>
     </button>
   );
 }

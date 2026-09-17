@@ -19,9 +19,14 @@ import { useApi } from "@/lib/use-api";
 import type { PoolAddressRow } from "@/types/api";
 import { useState } from "react";
 
+/**
+ * Mirrors what `GET /admin/api/pool-addresses` actually returns. The list is
+ * `addresses`, not `rows` -- reading the wrong key left this screen reporting a
+ * non-zero count from `total` above a table that said none had been minted.
+ */
 interface PoolsResponse {
-  rows: PoolAddressRow[];
-  total: string;
+  addresses: PoolAddressRow[];
+  total: number;
   asset: string;
 }
 
@@ -38,9 +43,9 @@ export default function Pools() {
   if (q.loading) return <Loading />;
   if (q.error) return <ErrorState error={q.error} retry={q.reload} />;
 
-  const rows = q.data?.rows ?? [];
+  const rows = q.data?.addresses ?? [];
   const asset = q.data?.asset ?? "USDT";
-  const funded = rows.filter((r) => r.balance && r.balance !== "0").length;
+  const funded = rows.filter((r) => r.balanceBaseUnits && r.balanceBaseUnits !== "0").length;
 
   return (
     <>
@@ -61,7 +66,7 @@ export default function Pools() {
         cards={[
           {
             title: "POOL ADDRESSES",
-            value: q.data?.total ?? "0",
+            value: q.data?.total ?? 0,
             sub: `${funded} holding a balance`,
             icon: "👛",
           },
@@ -106,12 +111,12 @@ export default function Pools() {
               header: `Balance (${asset})`,
               numeric: true,
               cell: (r) =>
-                r.balance == null ? (
+                r.balanceBaseUnits == null ? (
                   <span className="muted" title="Never observed — not the same as zero">
                     not observed
                   </span>
                 ) : (
-                  <Money base={r.balance} asset={asset} />
+                  <Money base={r.balanceBaseUnits} asset={asset} />
                 ),
             },
             { header: "Seen", cell: (r) => <span className="muted">{ago(r.observedAt)}</span> },

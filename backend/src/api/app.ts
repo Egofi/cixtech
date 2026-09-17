@@ -101,6 +101,22 @@ export interface AppOptions {
   cookie?: Partial<CookieOptions>;
 
   allowInsecureWebhooks?: boolean;
+
+  /**
+   * Whether to believe `X-Forwarded-For` when deriving `req.ip`.
+   *
+   * Load-bearing rather than cosmetic: `req.ip` keys the per-IP rate limit that
+   * caps credential guessing (CX-08), and is recorded in the sign-in log and the
+   * admin audit trail. Behind the console's reverse proxy every request arrives
+   * from nginx, so leaving this off collapses every caller into one bucket and
+   * one audit IP.
+   *
+   * Turning it on is only safe when the API cannot be reached except through the
+   * proxy -- otherwise anyone able to hit it directly forges the header and the
+   * rate limit stops meaning anything. That is why the base compose file does not
+   * publish port 3000 and the dev overlay binds it to loopback.
+   */
+  trustProxy?: boolean | string | string[];
 }
 
 const DEFAULT_RATE_LIMIT = {
@@ -116,6 +132,7 @@ export async function buildApp(engine: Engine, opts: AppOptions = {}): Promise<F
     logger: opts.logger ?? DEFAULT_LOGGER,
 
     ajv: { customOptions: { removeAdditional: false } },
+    ...(opts.trustProxy !== undefined ? { trustProxy: opts.trustProxy } : {}),
   });
 
   app.addContentTypeParser<string>(

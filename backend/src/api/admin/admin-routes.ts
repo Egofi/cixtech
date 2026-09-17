@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { AdminService } from "@/services";
 import { type AuthStore, parseScopes } from "@/stores";
 
@@ -7,6 +7,7 @@ import { UnauthorizedError } from "@/common";
 import { ADMIN_ROUTES, accessForRoute } from "@/common/routes";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { type AuthContext, requirePermission, resolveAuth } from "../auth/session-middleware.js";
+import { assertTenantUserOf } from "./tenant-user-guard.js";
 
 const STATIC_TOKEN_ACTOR = "static-admin-token";
 
@@ -196,14 +197,26 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
     return { id, status: "dead" };
   });
   app.post(ADMIN_ROUTES.TENANTS, hidden, async (req, reply) => {
-    const body = (req.body ?? {}) as { name?: string; scopes?: unknown };
+    const body = (req.body ?? {}) as { name?: string; scopes?: unknown; ownerEmail?: string };
     const name = body.name;
     if (!name) return reply.status(400).send({ error: { code: "BAD_REQUEST", message: "name" } });
 
     const scopes = parseScopes(body.scopes);
+    const ownerEmail = body.ownerEmail?.trim();
 
-    const created = (await mutate(req, "tenant.create", name, { name, scopes }, () =>
-      service.createTenant(name, scopes),
+    // `ownerEmail` is what makes the tenant reachable by a person: without it the
+    // tenant has an API key and no `principal`, so nobody can sign into the
+    // portal for it. Optional so existing automation that only wants a machine
+    // credential still works; the console always sends it.
+    const created = (await mutate(
+      req,
+      "tenant.create",
+      name,
+      // The generated password is deliberately not here -- admin_audit is
+      // append-only and readable from the console, so a credential written into
+      // it could never be redacted afterwards.
+      { name, scopes, ...(ownerEmail ? { ownerEmail } : {}) },
+      () => service.createTenant(name, scopes, ownerEmail ? { email: ownerEmail } : undefined),
     )) as Awaited<ReturnType<AdminService["createTenant"]>>;
     return reply.status(201).send({ ...created, scopes });
   });
@@ -310,6 +323,67 @@ export function registerAdmin(app: FastifyInstance, opts: AdminOptions): void {
       authStore.revokeAllSessions(id, "revoked by an administrator"),
     )) as number;
     return { id, revoked };
+  });
+
+  /** See `assertTenantUserOf`: the rule lives there so it can be tested directly. */
+  const tenantUserOf = async (tenantId: string, userId: string) =>
+    assertTenantUserOf(await authStore.loadById(userId), tenantId);
+
+  app.post(ADMIN_ROUTES.TENANTS_BY_ID_USERS_BY_USER_ID_RESET_PASSWORD, hidden, async (req) => {
+    const { id, userId } = req.params as { id: string; userId: string };
+    const user = await tenantUserOf(id, userId);
+
+    // Generated here rather than accepted from the caller: it never travels in a
+    // request body, and the audit params below carry the email only.
+    const password = randomBytes(18).toString("base64url");
+
+    const revoked = (await mutate(
+      req,
+      "tenant_user.reset_password",
+      userId,
+      { tenantId: id, email: user.email },
+      async () => {
+        await authStore.setPassword(userId, password, true);
+        // Rotating the password is pointless while their existing browser
+        // sessions keep working -- a 12h session would outlive the reset.
+        return authStore.revokeAllSessions(userId, "password reset by an administrator");
+      },
+    )) as number;
+
+    return { id: userId, email: user.email, password, sessionsRevoked: revoked };
+  });
+
+  app.post(ADMIN_ROUTES.TENANTS_BY_ID_USERS_BY_USER_ID_REVOKE_SESSIONS, hidden, async (req) => {
+    const { id, userId } = req.params as { id: string; userId: string };
+    const user = await tenantUserOf(id, userId);
+    const revoked = (await mutate(
+      req,
+      "tenant_user.revoke_sessions",
+      userId,
+      { tenantId: id, email: user.email },
+      () => authStore.revokeAllSessions(userId, "revoked by an administrator"),
+    )) as number;
+    return { id: userId, revoked };
+  });
+
+  app.post(ADMIN_ROUTES.TENANTS_BY_ID_USERS_BY_USER_ID_DISABLE, hidden, async (req) => {
+    const { id, userId } = req.params as { id: string; userId: string };
+    const user = await tenantUserOf(id, userId);
+    await mutate(req, "tenant_user.disable", userId, { tenantId: id, email: user.email }, () =>
+      // `setStatus("disabled")` revokes their live sessions too, so this cuts
+      // access off now rather than at the next sign-in.
+      authStore.setStatus(userId, "disabled"),
+    );
+    return { id: userId, status: "disabled" };
+  });
+
+  app.post(ADMIN_ROUTES.TENANTS_BY_ID_USERS_BY_USER_ID_ENABLE, hidden, async (req) => {
+    const { id, userId } = req.params as { id: string; userId: string };
+    const user = await tenantUserOf(id, userId);
+    await mutate(req, "tenant_user.enable", userId, { tenantId: id, email: user.email }, () =>
+      authStore.setStatus(userId, "active"),
+    );
+    return { id: userId, status: "active" };
   });
 
   app.get(ADMIN_ROUTES.TENANTS_BY_ID_USERS, hidden, async (req) => {

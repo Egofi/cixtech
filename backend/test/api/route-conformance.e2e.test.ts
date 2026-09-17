@@ -1,5 +1,5 @@
-import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import {
   ADMIN_ROUTES,
   AUTH_ROUTES,
@@ -20,13 +20,35 @@ const CONSTS: Record<string, Record<string, string>> = {
   TENANT_ROUTES,
 };
 
+const ROUTE_METHODS = ["get", "post", "put", "patch", "delete"] as const;
+
+/**
+ * Every `.ts` under `src/api` that registers a route.
+ *
+ * Walked in Node rather than shelled out to `grep`. The previous version passed
+ * a pattern containing `|` to `execSync`, which on Windows runs through
+ * `cmd.exe` — where `|` is a pipe and the single quotes are not quotes. The
+ * command split apart, the call threw, and BOTH conformance assertions failed
+ * for a reason that had nothing to do with the routes. A guard that cannot run
+ * on a maintainer's machine is a guard that stops being trusted.
+ */
+function routeSourceFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) {
+      found.push(...routeSourceFiles(path));
+      continue;
+    }
+    if (!path.endsWith(".ts")) continue;
+    const source = readFileSync(path, "utf8");
+    if (ROUTE_METHODS.some((m) => source.includes(`app.${m}(`))) found.push(path);
+  }
+  return found;
+}
+
 function registeredInSource(): { keys: string[]; literals: string[] } {
-  const files = execSync(
-    "grep -rl 'app\\.\\(get\\|post\\|put\\|patch\\|delete\\)(' --include='*.ts' src/api",
-  )
-    .toString()
-    .trim()
-    .split("\n");
+  const files = routeSourceFiles("src/api");
   const keys: string[] = [];
   const literals: string[] = [];
   for (const f of files) {
@@ -35,7 +57,7 @@ function registeredInSource(): { keys: string[]; literals: string[] } {
       if (
         ts.isCallExpression(node) &&
         ts.isPropertyAccessExpression(node.expression) &&
-        ["get", "post", "put", "patch", "delete"].includes(node.expression.name.text) &&
+        (ROUTE_METHODS as readonly string[]).includes(node.expression.name.text) &&
         node.arguments.length > 0
       ) {
         const method = node.expression.name.text.toUpperCase();

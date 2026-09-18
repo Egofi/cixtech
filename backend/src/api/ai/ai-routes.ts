@@ -54,9 +54,16 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
   const aiCreateRuleSchema = {
     schema: {
       tags: ["ai"],
-      summary: "Create Autonomous Agentic Rule",
-      description:
-        "Registers an autonomous financial rule with custom triggers (BALANCE_BELOW, VELOCITY_ABOVE, ANOMALY_TRIGGERED).",
+      summary: "Create a monitoring rule (advisory — not enforced)",
+      description: [
+        "Registers a rule with a trigger (BALANCE_BELOW, VELOCITY_ABOVE, ANOMALY_TRIGGERED).",
+        "",
+        "**Rules are advisory today.** `GET /v1/ai/rules` evaluates them and reports which",
+        "have triggered, but no action is applied: `PAUSE_WITHDRAWALS` and `REQUIRE_APPROVAL`",
+        "are *reported*, never enforced. Money-out decisions are made only by the policy",
+        "engine (limits, allow-list, velocity, approvals, time-lock, kill switch), and a rule",
+        "here cannot loosen or tighten any of them. Treat this as a monitoring feed.",
+      ].join("\n"),
       body: {
         type: "object",
         required: ["name", "conditionType", "conditionThreshold", "action"],
@@ -80,8 +87,14 @@ export function registerAi(app: FastifyInstance, opts: AiOptions): void {
   const aiGetRulesSchema = {
     schema: {
       tags: ["ai"],
-      summary: "List Active Autonomous Financial Rules",
-      description: "Queries active autonomous rules and evaluation results.",
+      summary: "Evaluate this tenant's monitoring rules (advisory — not enforced)",
+      description: [
+        "Evaluates every active rule and returns whether it triggered, with the reason.",
+        "",
+        "`BALANCE_BELOW` is evaluated **per asset** against the tenant's available balances;",
+        "a rule triggers when any single asset is below its threshold, and the reason names",
+        "which. The reported `action` is informational — see the note on rule creation.",
+      ].join("\n"),
     },
   };
 

@@ -117,9 +117,12 @@ export interface PoolAddressRow {
   state: string;
   gatherStrategy: string;
   cooldownUntil: Timestamp | null;
-  balance: BaseUnits | null;
+  /** Null means never read from the chain, which is not the same as zero. */
+  balanceBaseUnits: BaseUnits | null;
   observedAt: Timestamp | null;
   lastError: string | null;
+  /** On-chain minus ledger for this address's (chain, merchant) group. */
+  groupDriftBaseUnits: BaseUnits;
 }
 
 export interface AuditRow {

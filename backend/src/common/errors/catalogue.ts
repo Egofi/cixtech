@@ -71,6 +71,10 @@ export const ERROR_CATALOGUE: Record<ErrorCode, ErrorPolicy> = {
     retryable: false,
   },
   SWEEP_HALTED: conflict(409),
+  // A dry gas float stalls token payouts on that chain until it is topped up:
+  // unavailable rather than invalid, worth paging on, and worth retrying.
+  GAS_FLOAT_DEPLETED: { status: 503, severity: "critical", exposable: false, retryable: true },
+  GAS_TREASURY_NOT_CONFIGURED: internal(500),
 
   CONFIG_NOT_FOUND: internal(500),
   CONFIG_INVALID_ENV: internal(500),

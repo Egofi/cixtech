@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { assetRegistry } from "@/chain-config";
 import { kyselyFor } from "@/postgres";
 import {
@@ -14,7 +14,7 @@ import {
   poolAddress,
 } from "@/queries";
 import { FeeSweepService, LedgerService } from "@/services";
-import { SqlKillSwitch, SqlLedgerStore } from "@/stores";
+import { AuthStore, SqlKillSwitch, SqlLedgerStore, TenantStore } from "@/stores";
 
 import { FeeTreasuryNotConfiguredError } from "@/common";
 import { accountTypeOf, feeSwept, normalBalance } from "@/ledger";
@@ -33,6 +33,12 @@ import {
   type Scope,
   type SqlClient,
 } from "@/types";
+
+/**
+ * The first person on a tenant gets `admin`: they have to be able to invite the
+ * rest of their people, and `member` deliberately cannot approve (ADR 0018).
+ */
+const TENANT_OWNER_ROLE = "admin";
 
 const DEFAULT_LIMIT = 100;
 const clampLimit = (n: number | undefined): number =>
@@ -308,6 +314,9 @@ export class AdminService {
         treasuryAddressFor: this.feeTreasuryAddressFor,
 
         ...(this.engine.authorizer ? { authorizer: this.engine.authorizer } : {}),
+        // Without this the sweep skips GatherStrategy.prepare, so an ERC-20
+        // sweep leg is broadcast from a pool address holding no native gas.
+        ...(this.engine.gatherStrategies ? { gatherStrategies: this.engine.gatherStrategies } : {}),
         killSwitch: this.killSwitch,
 
         gatherLease: this.engine.gatherLease,
@@ -485,11 +494,51 @@ export class AdminService {
     return rows.length > 0;
   }
 
-  createTenant(
+  /**
+   * Provision a tenant: the tenant row, a machine credential, and — when an
+   * owner email is given — the tenant's first human sign-in.
+   *
+   * Both credentials exist because they are not interchangeable (ADR 0018). The
+   * `cxk_…` key is for the tenant's backend calling `/v1`; the portal
+   * authenticates a *person* against a `principal`, so a tenant created without
+   * one has no way for anyone to sign in and was reachable only by API.
+   *
+   * The first user is a tenant `admin`: it can move funds, approve, and invite
+   * the rest of their people. The password is generated rather than accepted
+   * from the caller, so it never travels in a request body or an audit param,
+   * and `mustChangePassword` makes it a handover rather than a credential.
+   *
+   * One transaction, because a duplicate email is a normal thing to hit and the
+   * failure mode otherwise is an orphan tenant with a live API key and nobody
+   * able to sign in.
+   */
+  async createTenant(
     name: string,
     scopes?: readonly Scope[],
-  ): Promise<{ tenant: { id: string; name: string }; apiKey: string }> {
-    return this.engine.tenants.createTenant(name, scopes ?? SCOPES);
+    owner?: { email: string } | undefined,
+  ): Promise<{
+    tenant: { id: string; name: string };
+    apiKey: string;
+    owner: { email: string; role: string; password: string } | null;
+  }> {
+    return this.sql.transaction(async (tx) => {
+      const created = await new TenantStore(tx).createTenant(name, scopes ?? SCOPES);
+      if (!owner) return { ...created, owner: null };
+
+      const password = randomBytes(18).toString("base64url");
+      const principal = await new AuthStore(tx).createPrincipal({
+        kind: "tenant_user",
+        tenantId: created.tenant.id,
+        email: owner.email,
+        password,
+        role: TENANT_OWNER_ROLE,
+        mustChangePassword: true,
+      });
+      return {
+        ...created,
+        owner: { email: principal.email, role: principal.role, password },
+      };
+    });
   }
 
   issueKey(tenantId: string, scopes?: readonly Scope[], label?: string): Promise<string> {

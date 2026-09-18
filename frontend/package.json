@@ -2,6 +2,7 @@
   "name": "@cixtech/frontend",
   "version": "0.0.0",
   "private": true,
+  "packageManager": "pnpm@9.15.4",
   "description": "cixtech consoles — admin control plane and tenant portal (Next.js, static export)",
   "engines": { "node": ">=20.0.0" },
   "scripts": {

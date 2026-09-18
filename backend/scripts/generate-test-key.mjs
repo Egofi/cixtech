@@ -1,15 +1,28 @@
+// Issues a TENANT API KEY (`cxk_…`) against the configured database.
+// It does not generate CIXTECH_ENGINE_XPRV -- that is `pnpm generate-engine-key`.
+
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
-import { loadEnv } from "../apps/api/bundle.mjs";
+import { loadEnv } from "./load-env.mjs";
 
 loadEnv();
 
 const { Pool } = pg;
 
+// Only the configured database. This used to also try a hardcoded
+// `cixtech_owner:cixtech_owner_secret@localhost` URL, which is the same class of
+// committed default credential as CX-01/CX-02 -- and, worse, made the script
+// appear to succeed against a database the operator had not pointed it at.
 const targetUrls = new Set();
 const envUrl = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
 if (envUrl) targetUrls.add(envUrl);
-targetUrls.add("postgresql://cixtech_owner:cixtech_owner_secret@localhost:5432/cixtech");
+
+if (targetUrls.size === 0) {
+  console.error(
+    "No database configured. Set DATABASE_URL (or DIRECT_DATABASE_URL) in backend/.env.",
+  );
+  process.exit(1);
+}
 
 async function main() {
   const tenantId = randomUUID();
@@ -41,9 +54,13 @@ async function main() {
         dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1")
           ? "Local Docker Postgres"
           : "Configured DATABASE_URL";
-      console.log(`  ✓ Inserted key into ${hostLabel}`);
+      console.log(`  ok  Inserted key into ${hostLabel}`);
       successCount++;
     } catch (err) {
+      // Previously swallowed entirely, so "Failed to insert into any reachable
+      // database" was the only output for a missing table, a bad password or a
+      // refused connection alike.
+      console.error(`  failed  ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       await pool.end().catch(() => {});
     }

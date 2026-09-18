@@ -3,7 +3,10 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const root = process.argv[2] ?? "packages";
+// `pnpm guard:constants` passes `src`. The default matches it so that running the
+// script by hand scans the same tree — it used to default to `packages/`, which
+// has not existed since the workspace was flattened, so a bare run scanned nothing.
+const root = process.argv[2] ?? "src";
 const ALLOW_DIR = /[/\\]chain-config[/\\]/;
 const IS_SOURCE = /\.(ts|tsx|mjs|cjs|js)$/;
 const IS_TEST = /\.(test|spec)\./;

@@ -1,3 +1,11 @@
+# Local development conveniences. Never loaded unless passed with -f, so nothing
+# here can leak into a deployment by accident:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#   make up-dev
+#
+# Everything published here binds to 127.0.0.1, so it is reachable from this
+# machine and from nowhere else on the network.
 services:
   postgres:
     ports:
@@ -6,3 +14,24 @@ services:
   redis:
     ports:
       - "127.0.0.1:6380:6379"
+
+  api:
+    # The consoles do not need this -- they go through the web container's proxy.
+    # It is here so `curl`, `make smoke`, the API reference and a host-run
+    # `next dev` stay one hop away during development.
+    #
+    # The host port is configurable because 3000 is the most contested port on a
+    # developer machine; set CIXTECH_API_HOST_PORT when something else has it.
+    # The container port never moves, so nothing inside the compose network cares.
+    ports:
+      - "127.0.0.1:${CIXTECH_API_HOST_PORT:-3000}:3000"
+    environment:
+      # With the port republished, something on this machine can reach the API
+      # directly and forge X-Forwarded-For, which would let it evade the per-IP
+      # limit on failed credentials (SECURITY_AUDIT CX-08). Off here; the base
+      # file turns it on, where only the proxy can reach the API.
+      CIXTECH_TRUST_PROXY: "false"
+      # Plain http in development. A Secure cookie is accepted on localhost but
+      # dropped on any other http origin, which looks like a silent login failure
+      # when you open the console on a LAN address.
+      CIXTECH_COOKIE_SECURE: "false"

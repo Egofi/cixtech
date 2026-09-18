@@ -7,10 +7,10 @@ export default function Landing() {
       <h1>cixtech</h1>
       <p>Custody engine consoles</p>
       <div className="row" style={{ justifyContent: "center", gap: 10 }}>
-        <Link className="btn primary" href="/portal/">
+        <Link className="button primary" href="/portal/">
           Tenant dashboard
         </Link>
-        <Link className="btn" href="/admin/">
+        <Link className="button" href="/admin/">
           Admin console
         </Link>
       </div>

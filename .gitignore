@@ -34,3 +34,8 @@ keyshares/
 .whereweare
 
 .turbo/
+
+# Written by `next dev` (Next 16 ships agent rules into the project). Regenerated
+# on every dev run, so tracking them just produces churn.
+frontend/AGENTS.md
+frontend/CLAUDE.md

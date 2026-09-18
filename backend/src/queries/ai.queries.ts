@@ -81,12 +81,6 @@ export const aiBalances = {
 
   forAccount: (db: Db, account: string) =>
     db.selectFrom("balance").select(["account", "asset", "amount"]).where("account", "=", account),
-
-  matchingAccount: (db: Db, fragment: string) =>
-    db
-      .selectFrom("balance")
-      .select("amount")
-      .where("account", "like", sql<string>`'%' || ${fragment} || '%'`),
 };
 
 export const aiActivity = {

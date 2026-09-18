@@ -34,14 +34,30 @@ services:
       dockerfile: Dockerfile.api
     container_name: cixtech-api
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    # Not published. The consoles reach the API through the web container, which
+    # proxies /v1, /auth, /admin/api and /docs from its own origin -- so the API
+    # has no address the browser ever sees, and CIXTECH_TRUST_PROXY below can be
+    # believed. `docker-compose.dev.yml` republishes it on loopback for curl.
+    expose:
+      - "3000"
     env_file: ./backend/.env
     environment:
       NODE_ENV: production
       PORT: "3000"
-      DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:-cixtech_local_dev}@postgres:5432/${POSTGRES_DB:-cixtech}
-      DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:-cixtech_local_dev}@postgres:5432/${POSTGRES_DB:-cixtech}
+      # Safe only because nothing but the web container can reach this port. If
+      # you publish 3000 again, turn this off: anything able to call the API
+      # directly could otherwise forge X-Forwarded-For and walk past the per-IP
+      # rate limit that caps credential guessing (SECURITY_AUDIT CX-08).
+      CIXTECH_TRUST_PROXY: "true"
+      # Same-origin through the proxy, so there is no cross-origin caller to
+      # allow and no preflight to answer.
+      CIXTECH_CORS_ORIGINS: ""
+      # SameSite=Lax rather than None. ADR 0018 wanted this and could not have it
+      # while the consoles were a separate origin; the proxy is what makes it
+      # reachable, and it is strictly stronger.
+      CIXTECH_COOKIE_CROSS_SITE: "false"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in backend/.env — there is no default}@postgres:5432/${POSTGRES_DB:-cixtech}
+      DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in backend/.env — there is no default}@postgres:5432/${POSTGRES_DB:-cixtech}
       REDIS_URL: redis://redis:6379
       CIXTECH_DB_SSL: disable
     depends_on:
@@ -63,7 +79,7 @@ services:
     environment:
       NODE_ENV: production
       WORKER_PORT: "3001"
-      DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:-cixtech_local_dev}@postgres:5432/${POSTGRES_DB:-cixtech}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cixtech_owner}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in backend/.env — there is no default}@postgres:5432/${POSTGRES_DB:-cixtech}
       REDIS_URL: redis://redis:6379
       CIXTECH_DB_SSL: disable
     depends_on:
@@ -85,6 +101,19 @@ services:
     ports:
       - "8080:8080"
     env_file: ./backend/.env
+    environment:
+      # Empty on purpose: it makes the consoles build relative URLs, so every
+      # call goes to this origin and nginx forwards it. Set it to an API origin
+      # to go back to the browser calling the API directly, cross-origin -- in
+      # which case CIXTECH_CORS_ORIGINS and CIXTECH_COOKIE_CROSS_SITE on the api
+      # service have to come back too.
+      #
+      # Declared here rather than left to backend/.env so that a stale
+      # CIXTECH_API_BASE in an existing .env cannot quietly defeat the proxy.
+      CIXTECH_API_BASE: ""
+      CIXTECH_API_UPSTREAM: http://api:3000
+    depends_on:
+      api: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s

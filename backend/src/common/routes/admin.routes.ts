@@ -24,6 +24,12 @@ export const ADMIN_ROUTES = {
   TENANTS_BY_ID_KEYS_BY_KEY_ID_REVOKE: "/admin/api/tenants/:id/keys/:keyId/revoke",
   TENANTS_BY_ID_KEYS_ROTATE: "/admin/api/tenants/:id/keys/rotate",
   TENANTS_BY_ID_USERS: "/admin/api/tenants/:id/users",
+  TENANTS_BY_ID_USERS_BY_USER_ID_DISABLE: "/admin/api/tenants/:id/users/:userId/disable",
+  TENANTS_BY_ID_USERS_BY_USER_ID_ENABLE: "/admin/api/tenants/:id/users/:userId/enable",
+  TENANTS_BY_ID_USERS_BY_USER_ID_RESET_PASSWORD:
+    "/admin/api/tenants/:id/users/:userId/reset-password",
+  TENANTS_BY_ID_USERS_BY_USER_ID_REVOKE_SESSIONS:
+    "/admin/api/tenants/:id/users/:userId/revoke-sessions",
   WALLETS_VERIFY_ONCHAIN: "/admin/api/wallets/verify-onchain",
   WEBHOOKS: "/admin/api/webhooks",
   WEBHOOKS_BY_ID: "/admin/api/webhooks/:id",

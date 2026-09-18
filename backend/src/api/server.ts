@@ -7,6 +7,7 @@ import {
   FetchWebhookPoster,
   GasStation,
   PolicyEngine,
+  TreasuryGasFloat,
 } from "@/chains";
 import { openDatabase } from "@/postgres";
 import { LedgerService } from "@/services";
@@ -17,7 +18,11 @@ import { buildRouter } from "@/chains";
 import { buildApp } from "./app.js";
 
 import { buildEngine } from "./engine.js";
-import { assertCustodyModelAcknowledged, assertPolicyConfigured } from "./policy-config.js";
+import {
+  assertCustodyModelAcknowledged,
+  assertPolicyConfigured,
+  resolveTrustProxy,
+} from "./policy-config.js";
 import { assertSchemaReady } from "./sql.js";
 import { tenantScopedSql } from "./tenant-scope.js";
 import { assertPublicHost } from "./webhook-url.js";
@@ -80,16 +85,39 @@ async function main(): Promise<void> {
     ? new AuthorizingBroadcaster(router.broadcaster, gasAuthorizer)
     : router.broadcaster;
 
+  // One definition of "the gas treasury", shared by the thing that reads its
+  // balance and the thing that spends it — so the health check can never be
+  // answered about a different address than the one that pays.
+  //
+  // Per chain, because one address string cannot be two encodings: the same key
+  // is a `T…` base58 address on Tron and an `0x…` address on every EVM chain.
+  // A single value served whichever family it was written for and threw in the
+  // address decoder for the other. `CIXTECH_GAS_TREASURY_ADDRESS` stays as the
+  // fallback for a single-family deployment, matching how
+  // `CIXTECH_FEE_TREASURY_ADDRESS_<CHAIN>` already works below.
+  //
+  // The index is shared: it is a derivation path, not an encoding, so the same
+  // index is the same key on every chain.
+  const gasTreasuryOf = (
+    chain: string,
+  ): { address: string; derivationIndex: number } | undefined => {
+    const address = env[`CIXTECH_GAS_TREASURY_ADDRESS_${chain.toUpperCase()}`] ?? treasuryAddress;
+    return address && treasuryIndex
+      ? { address, derivationIndex: Number(treasuryIndex) }
+      : undefined;
+  };
+
+  const gasFundedChains = chains.filter((c) => gasTreasuryOf(c) !== undefined);
+
   const gasStation = new GasStation(
-    new LedgerService(new SqlLedgerStore(sql)),
+    // The chain, not the ledger: nothing posts to `gas_float:{chain}` yet, so a
+    // ledger-backed source would read 0 and refuse every token payout.
+    new TreasuryGasFloat(router.balances, gasTreasuryOf),
     gasConfigs,
-    treasuryAddress && treasuryIndex
+    gasFundedChains.length > 0
       ? new BroadcasterGasFunder(gasBroadcaster, router.balances, {
           nativeAssetOf: (c) => nativeAsset.get(c) ?? "",
-          treasuryOf: () => ({
-            address: treasuryAddress,
-            derivationIndex: Number(treasuryIndex),
-          }),
+          treasuryOf: gasTreasuryOf,
           topUpMultiple: GAS_TOP_UP_MULTIPLE,
           ...(gasAuthorizer ? { authorizer: gasAuthorizer } : {}),
         })
@@ -109,13 +137,14 @@ async function main(): Promise<void> {
     }),
   ]);
 
-  const gasFunding = treasuryAddress && treasuryIndex ? "enabled" : "DISABLED";
+  const gasFunding =
+    gasFundedChains.length > 0 ? `enabled on ${gasFundedChains.join(",")}` : "DISABLED";
   const notRegistered =
     skipped.length > 0
       ? ` | not registered: ${skipped.map((s) => `${s.chain} (${s.reason})`).join(", ")}`
       : "";
   const gasHint =
-    gasFunding === "DISABLED"
+    gasFundedChains.length === 0
       ? " — set CIXTECH_GAS_TREASURY_ADDRESS and _INDEX, or token payouts will fail at broadcast"
       : "";
   console.log(
@@ -182,8 +211,11 @@ async function main(): Promise<void> {
     .map((o) => o.trim())
     .filter(Boolean);
 
+  const trustProxy = resolveTrustProxy(env);
+
   const app = await buildApp(engine, {
     corsOrigins,
+    ...(trustProxy !== undefined ? { trustProxy } : {}),
     ...(env["CIXTECH_ALLOW_INSECURE_WEBHOOKS"] === "true" ? { allowInsecureWebhooks: true } : {}),
     ...(env["CIXTECH_PUBLIC_METRICS"] === "true" ? { publicMetrics: true } : {}),
     cookie: {
@@ -225,6 +257,9 @@ async function main(): Promise<void> {
       chains,
       database: db.describe,
       corsOrigins: corsOrigins.length > 0 ? corsOrigins : "none (same-origin only)",
+      // Printed because it silently changes what req.ip means, and therefore
+      // what the auth rate limiter counts and what the audit trail records.
+      trustProxy: trustProxy ?? "off (req.ip is the socket address)",
     },
     "cixtech API listening — consoles ship separately (apps/web), scheduled work in the worker (apps/worker)",
   );

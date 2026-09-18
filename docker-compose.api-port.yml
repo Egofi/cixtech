@@ -1,0 +1,24 @@
+# Publishes ONLY the API, on loopback.
+#
+# For running the consoles on the host (`make web`, hot reload) against a
+# containerised backend: Next's dev server proxies /v1, /auth, /admin/api and
+# /docs to CIXTECH_API_UPSTREAM, which has to be a port it can reach.
+#
+# Separate from docker-compose.dev.yml because that one also publishes Postgres
+# and Redis, which this workflow does not need -- and on a machine running other
+# projects those are the ports most likely to already be taken. Less exposed, and
+# fewer things to collide.
+#
+#   make up-backend                           API on 127.0.0.1:3000
+#   CIXTECH_API_HOST_PORT=3010 make up-backend    ...on 3010 instead
+services:
+  api:
+    ports:
+      - "127.0.0.1:${CIXTECH_API_HOST_PORT:-3000}:3000"
+    environment:
+      # The API is directly reachable in this mode, so a forged X-Forwarded-For
+      # could evade the per-IP limit on failed credentials. Same reasoning as
+      # docker-compose.dev.yml.
+      CIXTECH_TRUST_PROXY: "false"
+      # Plain http on localhost.
+      CIXTECH_COOKIE_SECURE: "false"

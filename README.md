@@ -51,7 +51,7 @@ docker compose down -v                   # stop, drop data
 | Variable | What it is |
 | --- | --- |
 | `POSTGRES_PASSWORD` | database password |
-| `CIXTECH_ENGINE_XPRV` | master key for every custody address — `cd backend && pnpm generate-test-key` |
+| `CIXTECH_ENGINE_XPRV` | master key for every custody address — `cd backend && pnpm generate-engine-key` (testnet only; production keys are a witnessed DKG ceremony, ADR 0007) |
 | `CIXTECH_ADMIN_TOKEN` | guards the admin plane, `/metrics`, kill switch, fee sweep |
 | `CIXTECH_POLICY_KEY` | signs the per-payout authorization token |
 
@@ -167,19 +167,40 @@ docker build -t cixtech-web .
 
 ---
 
-## The two settings that must agree
+## How the consoles reach the API
 
-The consoles are a separate origin, so this is the usual cause of "the console
-loads but every call fails":
+By default they do not reach it directly. The web container serves the consoles
+**and** proxies `/v1`, `/auth`, `/admin/api` and `/docs` to the API, so the
+browser only ever talks to one origin:
 
-| Variable | Where | Meaning |
-| --- | --- | --- |
-| `CIXTECH_API_BASE` | frontend | where the **browser** reaches the API |
-| `CIXTECH_CORS_ORIGINS` | backend | origins allowed to call the API (no wildcard) |
+```
+browser  ->  :8080/v1/...   (nginx)  ->  api:3000
+```
 
-`CIXTECH_API_BASE` must be reachable from the browser — `http://api:3000` works
-between containers and fails in a browser. Leave both empty when a reverse proxy
-fronts the API and the consoles under one hostname.
+The API is not published, so it has no address the browser could use; devtools
+shows console-origin requests only. Three things follow, and all of them are
+improvements rather than side effects:
+
+- **No CORS.** Same-origin means no allowlist to maintain and no preflight.
+- **`SameSite=Lax` cookies** instead of `SameSite=None`. ADR 0018 wanted this and
+  could not have it while the consoles were a separate origin.
+- **`X-Forwarded-For` matters.** Every request now arrives from nginx, so
+  `CIXTECH_TRUST_PROXY=true` is what keeps `req.ip` pointing at the real caller —
+  which is what the per-IP limit on failed credentials counts and what the
+  sign-in log records. It is safe **only** because nothing but the proxy can
+  reach the API. `docker-compose.dev.yml` republishes port 3000 on loopback for
+  `curl`, and turns this back off for exactly that reason.
+
+`pnpm dev` behaves the same way: `next.config.mjs` proxies the same four prefixes
+so the console code path never differs between development and production.
+
+### Going back to cross-origin
+
+Set `CIXTECH_API_BASE` to an origin the **browser** can reach, and
+`CIXTECH_CORS_ORIGINS` to the console origins allowed to call it (exact match, no
+wildcard). The console then calls the API directly and nginx stops proxying.
+`http://api:3000` works between containers and fails in a browser — that mismatch
+is the usual cause of "the console loads but every call fails".
 
 ---
 
@@ -190,3 +211,4 @@ In [`backend/docs/`](backend/docs/): [`DEPLOYMENT_TOPOLOGY.md`](backend/docs/DEP
 (findings, fixes, what is outstanding),
 [`CUSTODY_ENGINE_BUILD_SPEC.md`](backend/docs/CUSTODY_ENGINE_BUILD_SPEC.md) and
 [`adr/`](backend/docs/adr/).
+

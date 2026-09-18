@@ -31,6 +31,42 @@ const REQUIRED: ReadonlyArray<{ vars: readonly string[]; control: string; conseq
   },
 ];
 
+/**
+ * Read `CIXTECH_TRUST_PROXY` into Fastify's `trustProxy` option.
+ *
+ * `undefined` means "do not trust the header", which is the safe default and what
+ * an unset or malformed value gets. Accepted forms:
+ *
+ *   true             trust any upstream -- only when nothing but the proxy can reach us
+ *   false / unset    off
+ *   10.0.0.0/8,::1   trust these addresses or CIDRs
+ *
+ * Hop counts are deliberately not accepted: Fastify types `trustProxy` as
+ * `boolean | string | string[]`, and a bare number would have to be smuggled
+ * through as a string that is not a valid address. Naming the proxy is clearer
+ * than counting hops anyway.
+ *
+ * See `AppOptions.trustProxy` for why getting this wrong is a security problem
+ * rather than a formatting one.
+ */
+export function resolveTrustProxy(
+  env: Record<string, string | undefined> = process.env,
+): boolean | string[] | undefined {
+  const raw = env["CIXTECH_TRUST_PROXY"]?.trim();
+  if (!raw || raw.toLowerCase() === "false") return undefined;
+  if (raw.toLowerCase() === "true") return true;
+
+  // An address or CIDR list. Anything that parses as a plain number is neither,
+  // so it fails closed rather than being handed to Fastify as a surprise.
+  if (!Number.isNaN(Number(raw))) return undefined;
+
+  const entries = raw
+    .split(",")
+    .map((e) => e.trim())
+    .filter(Boolean);
+  return entries.length > 0 ? entries : undefined;
+}
+
 export function assertCustodyModelAcknowledged(
   env: Record<string, string | undefined> = process.env,
 ): { model: "hot-key"; acknowledged: boolean } {

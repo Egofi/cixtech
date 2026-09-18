@@ -28,8 +28,10 @@ import {
   QUEUE_WEBHOOK_DISPATCH,
   createQueues,
   createRedisConnection,
+  removeRepeatable,
   upsertRepeatable,
 } from "./queues.js";
+import { planExternalReconciliation } from "./reconcile-wiring.js";
 
 import { startDetectionWorker } from "./workers/detection-worker.js";
 import { startPoolBalanceWorker } from "./workers/pool-balance-worker.js";
@@ -99,11 +101,6 @@ async function main(): Promise<void> {
   const enumerator = new SqlPoolGroupEnumerator(sql);
   const ledgerForRecon = new LedgerService(new SqlLedgerStore(sql));
 
-  const stubBalanceSource = {
-    async balance(_chain: string, _address: string, _asset: string): Promise<bigint> {
-      return 0n;
-    },
-  };
   const useChainBalances = env["CIXTECH_RECONCILE_CHAIN_BALANCES"] === "true";
 
   let router: ReturnType<typeof buildRouter> | null = null;
@@ -113,26 +110,31 @@ async function main(): Promise<void> {
     log("no chain router available", { error: err instanceof Error ? err.message : String(err) });
   }
 
-  let reconciler: ExternalReconciler;
-  if (useChainBalances && router) {
-    log("reconciler using chain balance provider (CIXTECH_RECONCILE_CHAIN_BALANCES=true)");
-    reconciler = new ExternalReconciler(
-      ledgerForRecon,
-      enumerator,
-      router.router.balances,
-      assets,
-      new SqlKillSwitch(sql),
-    );
+  const reconcilePlan = planExternalReconciliation({
+    chainBalancesEnabled: useChainBalances,
+    hasChainRouter: router !== null,
+  });
+
+  const reconciler: ExternalReconciler | null =
+    reconcilePlan.enabled && router
+      ? new ExternalReconciler(
+          ledgerForRecon,
+          enumerator,
+          router.router.balances,
+          assets,
+          new SqlKillSwitch(sql),
+        )
+      : null;
+
+  if (reconciler) {
+    log("external reconciliation ON", { source: reconcilePlan.reason });
   } else {
-    log(
-      "reconciler running in ledger-only mode (set CIXTECH_RECONCILE_CHAIN_BALANCES=true for on-chain checks)",
-    );
-    reconciler = new ExternalReconciler(
-      ledgerForRecon,
-      enumerator,
-      stubBalanceSource,
-      assets,
-      new SqlKillSwitch(sql),
+    logError(
+      [
+        "EXTERNAL RECONCILIATION IS NOT RUNNING: the ledger is not being checked against",
+        "on-chain balances, so theft, a missed deposit or a posting bug would go undetected.",
+        reconcilePlan.reason,
+      ].join(" "),
     );
   }
 
@@ -156,14 +158,23 @@ async function main(): Promise<void> {
   );
 
   await upsertRepeatable(queues.webhookDispatch, "tick", WEBHOOK_DISPATCH_INTERVAL_MS);
-  await upsertRepeatable(queues.externalReconcile, "tick", reconcileInterval);
   await upsertRepeatable(queues.poolRelease, "tick", POOL_RELEASE_INTERVAL_MS);
   if (router) await upsertRepeatable(queues.poolBalance, "tick", poolBalanceInterval);
   if (router) await upsertRepeatable(queues.depositDetect, "tick", detectionInterval);
 
+  // A schedule left over from a run that HAD reconciliation enabled would keep
+  // enqueuing jobs no worker consumes, so retire it explicitly when it is off.
+  if (reconciler) {
+    await upsertRepeatable(queues.externalReconcile, "tick", reconcileInterval);
+  } else {
+    await removeRepeatable(queues.externalReconcile, "tick");
+  }
+
   log("repeatable schedules registered", {
     [QUEUE_WEBHOOK_DISPATCH]: `${WEBHOOK_DISPATCH_INTERVAL_MS}ms`,
-    [QUEUE_EXTERNAL_RECONCILE]: `${reconcileInterval}ms`,
+    [QUEUE_EXTERNAL_RECONCILE]: reconciler
+      ? `${reconcileInterval}ms`
+      : "disabled (no chain balance source)",
     [QUEUE_POOL_RELEASE]: `${POOL_RELEASE_INTERVAL_MS}ms`,
     [QUEUE_POOL_BALANCE]: router ? `${poolBalanceInterval}ms` : "disabled (no chain router)",
     [QUEUE_DEPOSIT_DETECT]: router ? `${detectionInterval}ms` : "disabled (no chain router)",
@@ -178,9 +189,10 @@ async function main(): Promise<void> {
 
   const workers: Worker[] = [
     startWebhookWorker(redis, webhookDispatcher, log),
-    startReconcilerWorker(redis, reconciler, log),
     startPoolReleaseWorker(redis, poolReleaseFn, log),
   ];
+
+  if (reconciler) workers.push(startReconcilerWorker(redis, reconciler, log));
 
   if (router) {
     const chainRouter = router.router;

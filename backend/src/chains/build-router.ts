@@ -1,5 +1,5 @@
 import { ChainRegistry } from "@/chain-config";
-import { ChainMisconfiguredError } from "@/common";
+import { ChainMisconfiguredError, InvalidEnvError } from "@/common";
 import type { SkippedChain, SqlClient } from "@/types";
 
 import { HDKey } from "@scure/bip32";
@@ -75,9 +75,45 @@ export interface BuiltRouter {
   skipped: SkippedChain[];
 }
 
+/**
+ * Fail on a missing or malformed engine key with a message that names the
+ * variable and what to do about it.
+ *
+ * Without this the first thing to touch the value is a base58 decoder, which
+ * reports `Unknown letter "_"` from four frames inside `HDKey` and never
+ * mentions `CIXTECH_ENGINE_XPRV` -- the placeholder `REPLACE_ME` fails exactly
+ * that way, and it is the single most likely value to still be in a new .env.
+ * Same posture as `resolveTokenContracts` below and `assertPolicyConfigured`:
+ * refuse to start, and say which variable and how to fix it.
+ */
+function assertEngineKey(value: string | undefined): string {
+  const remedy = [
+    "Generate one with `make key` (or `cd backend && pnpm generate-engine-key`)",
+    "and set CIXTECH_ENGINE_XPRV in backend/.env. Testnet and local development",
+    "only -- production keys are a witnessed DKG ceremony (ADR 0007).",
+  ].join(" ");
+
+  if (!value || value.trim() === "") {
+    throw new InvalidEnvError(`CIXTECH_ENGINE_XPRV is required. ${remedy}`);
+  }
+  if (value === "REPLACE_ME") {
+    throw new InvalidEnvError(
+      `CIXTECH_ENGINE_XPRV is still the placeholder from .env.example. ${remedy}`,
+    );
+  }
+  try {
+    HDKey.fromExtendedKey(value.trim());
+  } catch (cause) {
+    throw new InvalidEnvError(
+      `CIXTECH_ENGINE_XPRV is not a valid extended private key. ${remedy}`,
+      { cause },
+    );
+  }
+  return value.trim();
+}
+
 export function buildRouter(env: Env, sql: SqlClient): BuiltRouter {
-  const accountXprv = env["CIXTECH_ENGINE_XPRV"];
-  if (!accountXprv) throw new Error("CIXTECH_ENGINE_XPRV is required");
+  const accountXprv = assertEngineKey(env["CIXTECH_ENGINE_XPRV"]);
 
   const signer = makeTronSigner(accountXprv);
   const engineXpub = HDKey.fromExtendedKey(accountXprv).publicExtendedKey;

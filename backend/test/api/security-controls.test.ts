@@ -1,4 +1,8 @@
-import { assertCustodyModelAcknowledged, assertPolicyConfigured } from "@/api/policy-config.js";
+import {
+  assertCustodyModelAcknowledged,
+  assertPolicyConfigured,
+  resolveTrustProxy,
+} from "@/api/policy-config.js";
 import { parseScopes } from "@/stores";
 import { SCOPES } from "@/types";
 
@@ -432,5 +436,44 @@ describe("CX-12 — authentication failures are not persisted to the audit trail
     }
     const after = await engine.sql.query<{ n: string }>("SELECT count(*)::text n FROM error_log");
     expect(Number(after.rows[0]?.n)).toBe(Number(before.rows[0]?.n));
+  });
+});
+
+describe("CIXTECH_TRUST_PROXY decides what req.ip means", () => {
+  // req.ip keys the per-IP limit on failed credentials (CX-08) and is recorded
+  // in the sign-in log and admin audit. Behind the console proxy every request
+  // arrives from nginx, so this flag is what keeps those pointing at the caller
+  // -- and believing it while the API is separately reachable lets anyone forge
+  // X-Forwarded-For and walk past the limit. Every ambiguous value fails closed.
+  it("is off when unset, so the socket address is used", () => {
+    expect(resolveTrustProxy({})).toBeUndefined();
+  });
+
+  it("is off when explicitly false, in any case", () => {
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "false" })).toBeUndefined();
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "FALSE" })).toBeUndefined();
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "  " })).toBeUndefined();
+  });
+
+  it("trusts any upstream only on an explicit true", () => {
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "true" })).toBe(true);
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "True" })).toBe(true);
+  });
+
+  it("accepts an address or CIDR list", () => {
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "172.16.0.0/12" })).toEqual(["172.16.0.0/12"]);
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "10.0.0.1, ::1 ,172.18.0.0/16" })).toEqual([
+      "10.0.0.1",
+      "::1",
+      "172.18.0.0/16",
+    ]);
+  });
+
+  it("refuses a bare number rather than guessing what it meant", () => {
+    // Fastify types trustProxy without hop counts; a number is neither an
+    // address nor a CIDR, so it must not become one by accident.
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "1" })).toBeUndefined();
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "0" })).toBeUndefined();
+    expect(resolveTrustProxy({ CIXTECH_TRUST_PROXY: "-1" })).toBeUndefined();
   });
 });

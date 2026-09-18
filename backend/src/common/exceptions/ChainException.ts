@@ -52,3 +52,17 @@ export class FeeTreasuryNotConfiguredError extends ChainException {
 export class SweepHaltedError extends ChainException {
   readonly code = "SWEEP_HALTED";
 }
+
+/**
+ * The gas treasury cannot cover the fee for a token transfer. Temporary and
+ * fixable by topping it up, so it is retryable — and not exposable, because the
+ * size of our gas float is not a tenant's business.
+ */
+export class GasFloatDepletedError extends ChainException {
+  readonly code = "GAS_FLOAT_DEPLETED";
+}
+
+/** No gas treasury is configured at all — a deployment fault, not a transient one. */
+export class GasTreasuryNotConfiguredError extends ChainException {
+  readonly code = "GAS_TREASURY_NOT_CONFIGURED";
+}

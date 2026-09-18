@@ -3,7 +3,7 @@ import {
   type IndependentBalanceSource,
   type ReconcilerBreaker,
 } from "@/chains/reconcile/external-reconciler.js";
-import { GasStation } from "@/chains/treasury/gas-station.js";
+import { GasStation, LedgerGasFloat } from "@/chains/treasury/gas-station.js";
 import { depositFinalized } from "@/ledger";
 import { LedgerService } from "@/services";
 import { MemoryLedgerStore } from "@/stores";
@@ -133,7 +133,12 @@ describe("GasStation (§6.2, breaker-on-depletion)", () => {
 
   it("reports healthy above floor and does not trip", async () => {
     const breaker = new RecordingBreaker();
-    const station = new GasStation(await ledgerWithGas(5_000n), configs, undefined, breaker);
+    const station = new GasStation(
+      new LedgerGasFloat(await ledgerWithGas(5_000n)),
+      configs,
+      undefined,
+      breaker,
+    );
     const [status] = await station.monitor();
     expect(status).toMatchObject({ chain: "TRON", balance: 5_000n, healthy: true });
     expect(breaker.reasons).toHaveLength(0);
@@ -141,7 +146,12 @@ describe("GasStation (§6.2, breaker-on-depletion)", () => {
 
   it("trips the breaker when the float falls below floor", async () => {
     const breaker = new RecordingBreaker();
-    const station = new GasStation(await ledgerWithGas(500n), configs, undefined, breaker);
+    const station = new GasStation(
+      new LedgerGasFloat(await ledgerWithGas(500n)),
+      configs,
+      undefined,
+      breaker,
+    );
     const [status] = await station.monitor();
     expect(status?.healthy).toBe(false);
     expect(breaker.reasons[0]).toMatch(/depleted/);
